@@ -1,0 +1,5 @@
+# ShuratCode is the required reviewer for every change to this repository.
+# Enforced by the `main` ruleset: require_code_owner_review = true.
+# A PR author cannot approve their own PR, so changes authored by any other
+# account must be approved by @ShuratCode before main will accept them.
+* @ShuratCode
