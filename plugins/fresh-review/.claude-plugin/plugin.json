@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fresh-review",
-  "version": "0.1.0",
-  "description": "Pre-commit fresh-eyes code review. Runs the lattice review, the gstack review, and the gstack security audit against the current diff via context-isolated subagents, then triages the findings back in the producer context.",
+  "version": "0.2.0",
+  "description": "Pre-commit fresh-eyes code review. Runs the lattice review, a constrained gstack review, the gstack security audit, and a background cross-model Codex pass against one shared diff packet via context-isolated subagents, then triages the findings back in the producer context and logs the run.",
   "author": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"
@@ -10,6 +10,16 @@
   "homepage": "https://github.com/ShuratCode/ShuratCode-skills",
   "repository": "https://github.com/ShuratCode/ShuratCode-skills",
   "license": "MIT",
-  "keywords": ["review", "pre-commit", "security", "subagents", "lattice", "gstack"],
-  "dependencies": ["lattice@lattice"]
+  "keywords": [
+    "review",
+    "pre-commit",
+    "security",
+    "subagents",
+    "lattice",
+    "gstack",
+    "codex"
+  ],
+  "dependencies": [
+    "lattice@lattice"
+  ]
 }
