@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.1 — 2026-07-27
+
+### `fresh-review` 0.2.0 → 0.2.1
+
+**The reviewer-mutation guard was dead on clean-tree runs, and it failed silently.** Step 3 is
+skipped wholesale when `DIRTY=0`, which left `CHECKPOINT` and `CHECKPOINT_SHA` unset. An unset
+`CHECKPOINT` is not `committed`, so Step 6.5 took its no-checkpoint branch and diffed against a
+`pre-fanout.status` that was never written. `diff` sends that error to *stderr* and `|| true`
+swallows the exit code, so `LEAK` captured empty stdout and the check reported **no leak**
+regardless of what a reviewer wrote to the tree. A crash would have been the better failure —
+this looked like a passing safety check.
+
+The dead path is `DIRTY=0` + `AHEAD>0`, which Step 1 itself calls "the normal shape of an open
+PR whose work is fully committed and pushed" — so the guard was inert on one of the skill's most
+common invocations. Reported by Copilot on `vi-activate` PR #262 (filed as low-confidence; it was
+correct).
+
+Fixed by treating the skipped case like the clean-tree case, which is the stronger of the two
+available checks: when `DIRTY=0` the tree genuinely was clean at fan-out, so *any* dirt is a
+leak, where a baseline snapshot would only have caught deltas. Step 3 now sets
+`CHECKPOINT=skipped` explicitly, Step 6.5 matches `committed|skipped` with `case` and documents
+that neither `skipped` nor an unset value may fall through, and Step 9's index restore is gated
+on `!= skipped` so the code matches its own stated rule rather than relying on `read-tree`
+happening to be a no-op there.
+
+**Same root cause, second symptom: `/ship` suppression silently never applied on
+fully-committed branches.** `CHECKPOINT_SHA` was also unset on the skip path, so Step 4 wrote an
+empty `CHECKPOINT=` into `scope.txt` and Step 8.6 logged `"commit":""` to the handoff — matching
+nothing, disabling the dedup that Step 8.6 exists to provide. Now set from `git rev-parse HEAD`.
+
+Verified all three checkpoint states plus unset: the mutation check fires in every one, and Step
+9's two undos gate correctly per state.
+
 ## 0.3.0 — 2026-07-27
 
 ### `upgrade-all` 0.2.0 → 0.3.0

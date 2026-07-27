@@ -154,9 +154,18 @@ Keep `CHECKPOINT` distinct from `INDEX_TREE`, because the two undos in Step 9 ar
 
 **What the checkpoint is for:** making untracked files visible. A brand-new file does not appear in `git diff` at all, so without staging it the reviewers would never see the code most likely to contain fresh bugs. It also pins a stable SHA for the audit trail and for Codex's `--commit` scoping. It does not freeze what reviewers read — they read the packet, which is why the packet is built after this point and not before.
 
-Skip when `DIRTY=0`. On `CHECKPOINT=failed`, continue in no-checkpoint mode: build the packet from `git diff HEAD` / `git diff $DIFF_BASE`, and record in the report that untracked files went unreviewed. **Still run Step 9's index restore** — only the commit-reset half is skipped.
+Skip when `DIRTY=0` — but set the sentinel explicitly rather than leaving these variables unset, because three later steps branch on them:
 
-In no-checkpoint mode there is no clean baseline for the Step 6.5 mutation check, so take one now:
+```bash
+CHECKPOINT=skipped
+CHECKPOINT_SHA=$(git rev-parse HEAD)
+```
+
+Leaving `CHECKPOINT` empty silently breaks the Step 6.5 mutation check: an unset value is not `committed`, so the check takes its no-checkpoint branch and diffs against a `pre-fanout.status` that was never written — `diff` sends that error to stderr, `|| true` swallows the exit code, and `LEAK` comes back empty. The guard then reports *no leak* no matter what a reviewer wrote. Silent, not loud, and dead on precisely the `DIRTY=0`/`AHEAD>0` path Step 1 calls the normal shape of an open PR. An unset `CHECKPOINT_SHA` fails the same way but quieter: Step 4 writes an empty `CHECKPOINT=` into `scope.txt` and Step 8.6 logs `"commit":""`, which matches nothing, so ship's suppression silently never applies.
+
+On `CHECKPOINT=failed`, continue in no-checkpoint mode: build the packet from `git diff HEAD` / `git diff $DIFF_BASE`, and record in the report that untracked files went unreviewed. **Still run Step 9's index restore** — only the commit-reset half is skipped.
+
+In no-checkpoint mode (`failed` only — `skipped` already has a clean tree) there is no clean baseline for the Step 6.5 mutation check, so take one now:
 
 ```bash
 git status --porcelain > "$RUN_DIR/raw/pre-fanout.status"
@@ -336,14 +345,18 @@ Self-reporting is the only audit available for *reads* — a parent agent cannot
 
 The prompt asked the reviewers not to write. This verifies it, because a subagent inherits the parent's tool access — there is no per-call tool restriction to lean on, and `/review`'s auto-fix is a documented part of the workflow it was told to run.
 
-The Step 3 checkpoint committed everything, so the tree was clean when the fan-out started. Any dirt now came from a reviewer:
+Two of the three Step 3 outcomes leave a clean tree at fan-out — `committed` staged and committed everything, and `skipped` means `DIRTY=0` in the first place. In both, *any* dirt now came from a reviewer, which is the strongest form of this check. Only `failed` has the producer's own uncommitted work in the tree and needs a baseline diff:
 
 ```bash
 git status --porcelain > "$RUN_DIR/raw/post-fanout.status"
-if [ "$CHECKPOINT" = committed ]; then LEAK=$(cat "$RUN_DIR/raw/post-fanout.status")
-else LEAK=$(diff "$RUN_DIR/raw/pre-fanout.status" "$RUN_DIR/raw/post-fanout.status" || true); fi
+case "$CHECKPOINT" in
+  committed|skipped) LEAK=$(cat "$RUN_DIR/raw/post-fanout.status") ;;
+  *)                 LEAK=$(diff "$RUN_DIR/raw/pre-fanout.status" "$RUN_DIR/raw/post-fanout.status" || true) ;;
+esac
 [ -n "$LEAK" ] && printf 'REVIEWER_WROTE_TO_TREE\n%s\n' "$LEAK"
 ```
+
+Match on the sentinel explicitly — never let `skipped` (or an unset value) fall through to the `else` branch. See Step 3 for why that fails silently rather than loudly.
 
 If it fires:
 
@@ -354,11 +367,11 @@ git restore --source=HEAD --worktree -- .
 git status --porcelain --untracked-files=all
 ```
 
-- **Tracked files** revert to the checkpoint. Their content is committed, so nothing is lost.
+- **Tracked files** revert to `HEAD` — the checkpoint commit under `committed`, the user's own last commit under `skipped`. Either way the pre-review content is committed, so nothing of theirs is lost.
 - **Untracked files** are only *listed*, never cleaned. `git clean` here could delete real work — a build artifact, a watcher's output, or a file the user created a second ago. Report the paths and let them decide.
 - Record the violation and treat that pass's findings as still valid but its judgment as suspect: a reviewer that ignored "do not fix" may have ignored the forbidden-reads list too.
 
-In no-checkpoint mode the baseline is the Step 3 snapshot and the check is a diff of the two status files. **Do not auto-revert there** — the producer's own uncommitted work is interleaved with the reviewer's, and `git restore` cannot tell them apart. Print the delta, name the suspect paths, hand it to the user.
+Under `CHECKPOINT=failed` only, the baseline is the Step 3 snapshot and the check is a diff of the two status files. **Do not auto-revert there** — the producer's own uncommitted work is interleaved with the reviewer's, and `git restore` cannot tell them apart. Print the delta, name the suspect paths, hand it to the user.
 
 ### Step 7: Triage
 
@@ -468,8 +481,8 @@ In no-checkpoint mode, still write the entry but expect no suppression: the logg
 Regardless of verdict, undo the checkpoint and restore the original index. **Two independent undos:**
 
 ```bash
-[ "$CHECKPOINT" = committed ] && git reset --soft HEAD~1    # 1. drop the checkpoint commit
-[ -n "$INDEX_TREE" ] && git read-tree "$INDEX_TREE"         # 2. restore the exact pre-review index
+[ "$CHECKPOINT" = committed ] && git reset --soft HEAD~1                          # 1. drop the checkpoint commit
+[ "$CHECKPOINT" != skipped ] && [ -n "$INDEX_TREE" ] && git read-tree "$INDEX_TREE"  # 2. restore the pre-review index
 git status --short
 ```
 
@@ -477,7 +490,7 @@ git status --short
 
 Run **2** whenever `INDEX_TREE` is set and Step 3 ran `git add -A`, **including when `CHECKPOINT=failed`**. That is the case a "skip the restore in no-checkpoint mode" rule gets wrong: `add` had already staged everything, and skipping the restore leaves it that way. Run **1** only when the commit actually landed — resetting after a failed commit would throw away the user's last real commit.
 
-Skip both only when Step 3 was skipped outright (`DIRTY=0`): nothing was staged and nothing was committed, so there is nothing to undo.
+Skip both when `CHECKPOINT=skipped` (`DIRTY=0`): nothing was staged and nothing was committed, so there is nothing to undo. The `!= skipped` guard on **2** is what enforces that — `read-tree` would be a harmless no-op there, since the index already matches `INDEX_TREE`, but gating it keeps the code honest to the rule instead of relying on the no-op.
 
 Then tell the user: "Working tree restored — staged/unstaged split is back as it was."
 
