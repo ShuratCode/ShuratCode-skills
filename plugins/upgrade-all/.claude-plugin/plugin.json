@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "upgrade-all",
+  "version": "0.2.0",
+  "description": "Run all routine local upgrades in one flow: Homebrew formulas and casks with cleanup, gstack upgrade, and Claude Code plugin updates.",
+  "author": {
+    "name": "Shaked Eyal",
+    "url": "https://github.com/ShuratCode"
+  },
+  "homepage": "https://github.com/ShuratCode/ShuratCode-skills",
+  "repository": "https://github.com/ShuratCode/ShuratCode-skills",
+  "license": "MIT",
+  "keywords": ["upgrade", "maintenance", "homebrew", "gstack", "plugins"]
+}

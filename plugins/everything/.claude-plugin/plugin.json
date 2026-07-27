@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "everything",
+  "version": "0.1.0",
+  "description": "Meta-plugin with no skills of its own. Installing it pulls in every ShuratCode skill plus their dependencies.",
+  "author": {
+    "name": "Shaked Eyal",
+    "url": "https://github.com/ShuratCode"
+  },
+  "homepage": "https://github.com/ShuratCode/ShuratCode-skills",
+  "repository": "https://github.com/ShuratCode/ShuratCode-skills",
+  "license": "MIT",
+  "keywords": ["bundle", "meta", "all"],
+  "dependencies": ["fresh-review", "upgrade-all", "restaurant-search"]
+}

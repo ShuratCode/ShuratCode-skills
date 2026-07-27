@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ShuratCode-skills",
+  "description": "Shaked Eyal's personal skills for Claude Code and Claude Desktop (Cowork).",
+  "version": "0.1.0",
+  "owner": {
+    "name": "Shaked Eyal",
+    "url": "https://github.com/ShuratCode"
+  },
+  "allowCrossMarketplaceDependenciesOn": ["lattice"],
+  "plugins": [
+    {
+      "name": "fresh-review",
+      "source": "./plugins/fresh-review",
+      "description": "Pre-commit fresh-eyes code review with enforced producer/reviewer context separation.",
+      "category": "code-review",
+      "keywords": ["review", "pre-commit", "security", "subagents"]
+    },
+    {
+      "name": "upgrade-all",
+      "source": "./plugins/upgrade-all",
+      "description": "One-shot local maintenance: Homebrew, gstack, and Claude Code plugin updates.",
+      "category": "maintenance",
+      "keywords": ["upgrade", "homebrew", "gstack", "plugins"]
+    },
+    {
+      "name": "restaurant-search",
+      "source": "./plugins/restaurant-search",
+      "description": "Find restaurants that are verifiably open and verifiably serve a qualifying dish.",
+      "category": "personal",
+      "keywords": ["restaurants", "food", "search", "kosher", "vegetarian"]
+    },
+    {
+      "name": "everything",
+      "source": "./plugins/everything",
+      "description": "Meta-plugin: installs every ShuratCode skill and its dependencies.",
+      "category": "bundle",
+      "keywords": ["bundle", "all"]
+    }
+  ]
+}

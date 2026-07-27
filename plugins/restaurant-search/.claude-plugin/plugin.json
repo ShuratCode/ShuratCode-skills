@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "restaurant-search",
+  "version": "0.1.0",
+  "description": "Find restaurants in a given area that are verifiably open at a given time and verifiably serve a qualifying dish, by searching the web and reading real menus.",
+  "author": {
+    "name": "Shaked Eyal",
+    "url": "https://github.com/ShuratCode"
+  },
+  "homepage": "https://github.com/ShuratCode/ShuratCode-skills",
+  "repository": "https://github.com/ShuratCode/ShuratCode-skills",
+  "license": "MIT",
+  "keywords": ["restaurants", "food", "search", "kosher", "vegetarian", "travel"]
+}
