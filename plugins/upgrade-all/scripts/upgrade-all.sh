@@ -108,7 +108,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3-5) Claude plugins (lattice, aws-core, sparkpilot)
+# 3-5) Claude plugins (lattice, aws-core, sparkpilot, ShuratCode-skills)
+#
+# `upgrade-all` updates itself last. Doing so is safe because a new version
+# installs into a sibling directory (cache/<mkt>/<plugin>/<version>/) rather
+# than overwriting the running script, but keeping it last avoids any question
+# about bash re-reading a file mid-execution.
 # ---------------------------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
   logrun "claude plugins marketplace update" claude plugins marketplace update || true
@@ -139,10 +144,14 @@ if command -v claude >/dev/null 2>&1; then
   upgrade_plugin "lattice"    "lattice@lattice"                  "lattice"
   upgrade_plugin "aws-core"   "aws-core@claude-plugins-official" "aws-core"
   upgrade_plugin "sparkpilot" "sparkpilot@vi-technologies"       "sparkpilot"
+  upgrade_plugin "everything"        "everything@ShuratCode-skills"        "everything"
+  upgrade_plugin "fresh-review"      "fresh-review@ShuratCode-skills"      "fresh-review"
+  upgrade_plugin "restaurant-search" "restaurant-search@ShuratCode-skills" "restaurant-search"
+  upgrade_plugin "upgrade-all"       "upgrade-all@ShuratCode-skills"       "upgrade-all"
 else
-  add "lattice" "SKIPPED" "claude CLI not found"
-  add "aws-core" "SKIPPED" "claude CLI not found"
-  add "sparkpilot" "SKIPPED" "claude CLI not found"
+  for _p in lattice aws-core sparkpilot everything fresh-review restaurant-search upgrade-all; do
+    add "$_p" "SKIPPED" "claude CLI not found"
+  done
 fi
 
 # ---------------------------------------------------------------------------

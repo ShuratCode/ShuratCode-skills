@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 — 2026-07-27
+
+### `upgrade-all` 0.2.0 → 0.3.0
+
+**`/upgrade-all` never updated this marketplace's own plugins.** It refreshed marketplace
+metadata with `claude plugins marketplace update`, then updated a hardcoded list of
+`lattice`, `aws-core`, and `sparkpilot` — so `fresh-review` and its siblings stayed pinned at
+whatever version was installed, indefinitely and silently. Found while checking why the local
+install was still on `fresh-review` 0.1.0 after the 0.2.0 release.
+
+The list now also covers `everything`, `fresh-review`, `restaurant-search`, and `upgrade-all`.
+`upgrade-all` updates itself last: a new version installs into a sibling
+`cache/<marketplace>/<plugin>/<version>/` directory rather than overwriting the running
+script, so it is safe either way, but ordering it last removes the question entirely.
+
+The `claude CLI not found` fallback branch was looping-ified so the skip list cannot drift out
+of sync with the update list again — the previous form repeated each plugin name by hand and
+would have needed a second edit that is easy to forget.
+
+Verified against the real CLI that the `CURRENT` classifier still fires correctly: an
+up-to-date plugin prints `✔ fresh-review is already at the latest version (0.2.0).`, which
+matches the existing `already|up to date|up-to-date|no update` pattern. Without that check a
+current plugin would have been mislabelled `UPGRADED` in every summary.
+
+Skill description and body updated to name the plugins actually covered.
+
 ## 0.2.0 — 2026-07-27
 
 ### `fresh-review` 0.1.0 → 0.2.0
