@@ -2,10 +2,11 @@
 name: upgrade-all
 description: >
   Run all routine local upgrades in one flow: Homebrew formulas and casks with cleanup,
-  gstack upgrade, lattice marketplace/plugin update, aws-core plugin update, and sparkpilot
-  plugin update. Use this whenever the user asks to "upgrade all", "full upgrade run",
-  "upgrade brew gstack lattice", "maintenance upgrade", or to upgrade brew, gstack, lattice
-  and the aws plugin together.
+  gstack upgrade, and Claude Code plugin updates for lattice, aws-core, sparkpilot, and the
+  ShuratCode-skills plugins (everything, fresh-review, restaurant-search, upgrade-all). Use
+  this whenever the user asks to "upgrade all", "full upgrade run", "upgrade brew gstack
+  lattice", "maintenance upgrade", or to upgrade brew, gstack, lattice and the aws plugin
+  together.
 allowed-tools:
   - Bash
   - Read
@@ -24,15 +25,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-all.sh"
 
 The script runs, in order: Homebrew (update/upgrade/cask/cleanup/autoremove), gstack
 (inline non-interactive git upgrade + migrations), and the `claude plugins` updates for
-lattice, aws-core, and sparkpilot. It prints exactly one `=== UPGRADE-ALL SUMMARY ===`
-block and writes verbose per-step output to a log file.
+lattice, aws-core, sparkpilot, and the four ShuratCode-skills plugins (`everything`,
+`fresh-review`, `restaurant-search`, `upgrade-all` — self last). It prints exactly one
+`=== UPGRADE-ALL SUMMARY ===` block and writes verbose per-step output to a log file.
 
 ## 2) Report the result
 
 Read only the SUMMARY block from the script's stdout. Each line is
 `component: STATUS — detail`, where STATUS is `UPGRADED`, `CURRENT`, `SKIPPED`, or
 `FAILED`. Relay it to the user as a concise summary covering brew, gstack, lattice,
-aws-core, and sparkpilot.
+aws-core, sparkpilot, and the ShuratCode-skills plugins.
 
 - Do **not** re-run the individual upgrade commands — the script already did everything.
 - If any line is `FAILED`, the script appends the tail of the log and a `LOG:` path.
