@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.4.0 — 2026-07-29
+
+### New plugin: `pull-all` 0.1.0
+
+`/pull-all <path>` walks a directory tree, finds every git repo under it, and brings each
+one's main branch up to date with origin — in parallel, with one summary block instead of
+per-repo git noise. `plugins/everything` 0.1.0 → 0.2.0 to pick it up.
+
+The work is in `scripts/pull-all.sh`; the skill is its man page. Semantics that fell out of
+testing against a fixture tree covering clean / dirty / detached / diverged / `master`-default
+/ no-remote / submodule / no-local-main repos:
+
+- **Never switches branches.** A repo checked out on `feature/x` gets its main advanced via
+  `git fetch origin main:main`, which moves the ref without touching the worktree. Verified:
+  the branch stays `feature/x` and the working file stays at its pre-update content while
+  `main` lands exactly on `origin/main`.
+- **Never merges non-fast-forward.** `merge --ff-only` for the checked-out case, a plain ref
+  fetch otherwise. Ahead-*and*-behind is reported `DIVERGED` and left alone.
+- **Never touches a dirty tree** (tracked modifications ⇒ `SKIPPED`; untracked files are
+  ignored, since they don't block a fast-forward).
+- **`git pull` is never invoked**, so a configured `pull.rebase` can't change behavior.
+- Statuses sort worst-first — `FAILED`, `DIVERGED`, `SKIPPED`, then `UPDATED` / `CREATED` /
+  `CURRENT` — so the lines needing a human are at the top of what the agent reads.
+
+Two defaults exist because the first real scan of `~` got them wrong:
+
+- **Dot-directories are pruned.** Without that, a `~` scan finds `~/.nvm` and `~/.oh-my-zsh`
+  and offers to update them. `~/.nvm` sits at a detached HEAD, so it would have grown a local
+  `master` branch it never had. `--hidden` opts back in.
+- **A missing target branch is `SKIPPED`, not created.** Creating branches in a repo that
+  deliberately has none is the surprising choice; the fetch already refreshed `origin/main`,
+  so there is nothing lost. `--create` opts in.
+
+The find expression is `\( -name '.[^.]*' ! -name .git \) -prune -o -name .git -print`. The
+`! -name .git` is load-bearing — `.git` is itself a dot-name, so pruning dot-dirs without the
+exclusion prunes every repo before `-print` sees it and the script silently reports zero repos.
+
+Written for bash 3.2 (macOS `/bin/bash`): no associative arrays, no `wait -n`, no `mapfile`.
+The `-j` throttle polls `jobs -rp`, and the per-repo network timeout is a hand-rolled
+background-and-poll helper rather than `timeout(1)`, which macOS doesn't ship. `GIT_TERMINAL_PROMPT=0`
+plus `ssh -o BatchMode=yes` mean an auth-requiring remote fails fast instead of hanging on a prompt.
+
+#### Bare repos with linked worktrees
+
+Running against a real 18-repo work tree found two bugs the synthetic fixtures missed, both
+triggered by one repo: `core.bare = true`, files still on disk, real checkouts living in
+linked worktrees (the Cursor / `.claude/worktrees` pattern).
+
+- **A bare repo still answers `symbolic-ref HEAD` with a branch name**, so the target looked
+  checked out and the run took the `merge --ff-only` path, dying with `fatal: this operation
+  must be run in a work tree`. Bare is now detected with `git rev-parse --is-bare-repository`
+  and routed to the ref-fetch path, which is what a bare repo wants anyway.
+- **`git status` exits 128 in a bare repo, and the dirty gate read it as clean.** Only stdout
+  was captured, so an errored status was indistinguishable from no modifications — the repo
+  passed the safety check and then failed at the merge. A crash was the *lucky* outcome here;
+  the same fail-open would have mattered more in a repo where the merge could have succeeded.
+  The check now tests the exit status and reports `cannot read status`.
+
+**Only the primary worktree is ever written to.** Nothing under `<repo>/.claude/worktrees/*`
+or `~/.cursor/worktrees/*` is touched — those are in-flight task checkouts belonging to an
+open session, not repos to freshen. Two layers enforce it: discovery reports a `.git` *file*
+as `SKIPPED  submodule or linked worktree`, and a repo whose target branch turns out to be
+checked out in a linked worktree is `SKIPPED  <branch> is checked out in linked worktree
+<path>`. git also refuses to fetch into a branch checked out anywhere, so there is no safe
+action in that case regardless.
+
+Note that `git worktree list` includes the *primary* worktree, so on an ordinary repo sitting
+on main the reported holder is the repo directory itself. The lookup runs only after the
+`cur == target` case has returned, so normal repos never reach it and are never mistaken for
+a linked holder.
+
+Both shapes are now permanent fixtures. Verified on the work tree: 9 repos fast-forwarded to
+land exactly on `origin/*`, a repo on `docs/add-agents-md` kept its branch and worktree, the
+bare repo's three Cursor worktrees were untouched, and 3 dirty repos stayed dirty and
+un-advanced.
+
 ## 0.3.1 — 2026-07-27
 
 ### `fresh-review` 0.2.0 → 0.2.1
