@@ -137,8 +137,16 @@ process_repo() {
     emit SKIPPED "$repo" "origin/$target does not exist" "$slot"; return
   fi
 
-  local cur; cur="$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null)"
-  [ -n "$cur" ] || cur="(detached)"
+  # A bare repo still reports a symbolic HEAD, so asking for the branch name is not
+  # enough to know whether anything is checked out here. Treating it as checked out
+  # sends us into `merge --ff-only`, which dies with "must be run in a work tree".
+  local cur
+  if [ "$(git -C "$repo" rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
+    cur="(bare)"
+  else
+    cur="$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null)"
+    [ -n "$cur" ] || cur="(detached)"
+  fi
 
   if ! git -C "$repo" show-ref --verify --quiet "refs/heads/$target"; then
     if [ "$CREATE" -eq 0 ]; then
@@ -174,7 +182,12 @@ process_repo() {
   fi
 
   if [ "$cur" = "$target" ]; then
-    if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    # Fail closed: a status read that *errors* must not be mistaken for a clean tree.
+    local st
+    if ! st="$(git -C "$repo" status --porcelain --untracked-files=no 2>>"$LOG")"; then
+      emit SKIPPED "$repo" "cannot read status on $target ($behind behind)" "$slot"; return
+    fi
+    if [ -n "$st" ]; then
       emit SKIPPED "$repo" "dirty working tree on $target ($behind behind)" "$slot"; return
     fi
     if [ "$DRY" -eq 1 ]; then
@@ -188,6 +201,15 @@ process_repo() {
       emit FAILED "$repo" "ff-only merge failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-120)" "$slot"
     fi
     return
+  fi
+
+  # target is not checked out here, but a linked worktree may hold it — git refuses to
+  # fetch into a branch checked out anywhere, so say so instead of reporting FAILED.
+  local wt
+  wt="$(git -C "$repo" worktree list --porcelain 2>/dev/null \
+        | awk -v b="branch refs/heads/$target" '$0=="worktree"{w=""} /^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
+  if [ -n "$wt" ]; then
+    emit SKIPPED "$repo" "$target is checked out in linked worktree $wt ($behind behind)" "$slot"; return
   fi
 
   # target is not checked out: move the local ref without touching the worktree

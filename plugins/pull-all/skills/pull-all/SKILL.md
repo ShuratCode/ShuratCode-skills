@@ -53,7 +53,7 @@ that need a human are at the top. Verbose git output goes to the `LOG:` file.
 |---|---|
 | `FAILED` | fetch or merge errored — remote gone, no auth, timeout |
 | `DIVERGED` | local main has commits origin/main doesn't **and** vice versa — needs a human |
-| `SKIPPED` | dirty tree, no origin, no local target branch, or submodule |
+| `SKIPPED` | dirty tree, unreadable status, no origin, no local target branch, submodule, or target held by a linked worktree |
 | `UPDATED` | fast-forwarded (`main +36`) |
 | `CREATED` | local target branch created from origin (only with `--create`) |
 | `CURRENT` | already up to date |
@@ -89,7 +89,8 @@ These are guarantees of the script, worth stating to the user when they hesitate
 - **Never merges non-fast-forward.** `--ff-only` on the checked-out case; a plain ref
   fetch otherwise. Anything that isn't a fast-forward is reported as `DIVERGED`, untouched.
 - **Never touches a dirty tree.** Tracked-file modifications mean `SKIPPED`. Untracked
-  files are ignored — they don't block a fast-forward.
+  files are ignored — they don't block a fast-forward. A `git status` that *errors* is also
+  `SKIPPED`, never assumed clean.
 - **Never creates branches by default.** `--create` is opt-in.
 
 To undo an `UPDATED` repo: `git -C <repo> reset --hard <pre-sha>`, where the pre-sha is
@@ -115,6 +116,19 @@ in the `LOG:` file's `Updating <old>..<new>` line.
 - **Submodules and linked worktrees are `SKIPPED`, detected by `.git` being a file**
   rather than a directory. Pulling a submodule's own main is almost never what the parent
   repo wants.
+- **A bare repo still answers `symbolic-ref HEAD` with a branch name.** `~/activate/vi-activate`
+  has `core.bare = true` with files on disk and its real checkouts in linked worktrees (the
+  Cursor / `.claude/worktrees` pattern). Asking for the branch name says `main`, so a naive
+  script takes the checked-out path and dies with `fatal: this operation must be run in a
+  work tree`. Detection is `git rev-parse --is-bare-repository`; bare repos take the ref-fetch
+  path and report `in place (on (bare))`.
+- **`git status` exits 128 in a bare repo, and an errored status read must not look clean.**
+  Capturing only stdout makes the failure indistinguishable from a clean tree, so the repo
+  sails through the dirty gate and fails later at the merge. The check tests the exit status
+  and reports `cannot read status` — fail closed, not open.
+- **If the target branch is checked out in a *linked* worktree, git refuses to fetch into
+  it.** That's reported as `SKIPPED  main is checked out in linked worktree <path>` rather
+  than `FAILED`, since nothing is broken — the branch is simply live somewhere else.
 - **`CURRENT` can still mean "you have unpushed work."** The detail reads
   `main up to date (13 unpushed)` — nothing to pull, but the branch is ahead.
 - **A repo whose GitHub remote was renamed or deleted shows up as `FAILED` with

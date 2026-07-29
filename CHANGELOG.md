@@ -42,6 +42,31 @@ The `-j` throttle polls `jobs -rp`, and the per-repo network timeout is a hand-r
 background-and-poll helper rather than `timeout(1)`, which macOS doesn't ship. `GIT_TERMINAL_PROMPT=0`
 plus `ssh -o BatchMode=yes` mean an auth-requiring remote fails fast instead of hanging on a prompt.
 
+#### Bare repos with linked worktrees
+
+Running against a real 18-repo work tree found two bugs the synthetic fixtures missed, both
+triggered by one repo: `core.bare = true`, files still on disk, real checkouts living in
+linked worktrees (the Cursor / `.claude/worktrees` pattern).
+
+- **A bare repo still answers `symbolic-ref HEAD` with a branch name**, so the target looked
+  checked out and the run took the `merge --ff-only` path, dying with `fatal: this operation
+  must be run in a work tree`. Bare is now detected with `git rev-parse --is-bare-repository`
+  and routed to the ref-fetch path, which is what a bare repo wants anyway.
+- **`git status` exits 128 in a bare repo, and the dirty gate read it as clean.** Only stdout
+  was captured, so an errored status was indistinguishable from no modifications — the repo
+  passed the safety check and then failed at the merge. A crash was the *lucky* outcome here;
+  the same fail-open would have mattered more in a repo where the merge could have succeeded.
+  The check now tests the exit status and reports `cannot read status`.
+
+Handled while in there: if the target branch is checked out in a *linked* worktree, git
+refuses to fetch into it. That's now `SKIPPED  <branch> is checked out in linked worktree
+<path>` rather than `FAILED` — nothing is broken, the branch is just live elsewhere.
+
+Both shapes are now permanent fixtures. Verified on the work tree: 9 repos fast-forwarded to
+land exactly on `origin/*`, a repo on `docs/add-agents-md` kept its branch and worktree, the
+bare repo's three Cursor worktrees were untouched, and 3 dirty repos stayed dirty and
+un-advanced.
+
 ## 0.3.1 — 2026-07-27
 
 ### `fresh-review` 0.2.0 → 0.2.1
