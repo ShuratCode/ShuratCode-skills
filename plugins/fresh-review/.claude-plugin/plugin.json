@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fresh-review",
-  "version": "0.2.1",
-  "description": "Pre-commit fresh-eyes code review. Runs the lattice review, a constrained gstack review, the gstack security audit, and a background cross-model Codex pass against one shared diff packet via context-isolated subagents, then triages the findings back in the producer context and logs the run.",
+  "version": "0.3.0",
+  "description": "Pre-commit fresh-eyes code review. Runs the lattice review, the gstack security audit, and a background cross-model Codex pass against one shared diff packet via context-isolated subagents, then triages the findings back in the producer context and logs the run. Deliberately skips gstack's /review — /ship runs that on the final diff — and ships a dispatch gate that trims the parts of ship's own review army this run already covered.",
   "author": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"

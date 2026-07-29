@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# fr-preflight.sh — Step 1 + Step 2. Probes the repo, resolves the review scope,
+# creates the run directory, and writes the state file every later script reads.
+#
+# Output contract (stdout): one block, keys only, no diff content.
+#   === FRESH-REVIEW PREFLIGHT ===
+#   STATUS: ok | stop
+#   STOP_REASON: <slug>            (only when STATUS: stop)
+#   RUN_DIR / STATE / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE / INDEX_TREE
+#   HAS_GSTACK / HAS_CODEX / CODEX_CFG / GSTACK_BIN / REVIEW_SCOPE / DIFF_CMD
+#   === END ===
+#
+# Exit 0 with STATUS: stop is a normal, expected outcome — the caller reads
+# STOP_REASON and tells the user. A non-zero exit means the script itself broke.
+
+set -u
+
+emit() { printf '%s\n' "$1"; }
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  emit "=== FRESH-REVIEW PREFLIGHT ==="
+  emit "STATUS: stop"
+  emit "STOP_REASON: not_a_repo"
+  emit "=== END ==="
+  exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+BRANCH=$(git branch --show-current)
+DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
+INDEX_TREE=$(git write-tree 2>/dev/null || echo "")
+
+GSTACK_ROOT=""
+for d in "$HOME/.claude/skills/gstack" "$HOME/.gstack/repos/gstack"; do
+  [ -d "$d" ] && { GSTACK_ROOT="$d"; break; }
+done
+GSTACK_BIN="${GSTACK_ROOT:+$GSTACK_ROOT/bin}"
+
+HAS_GSTACK=$([ -f "$HOME/.claude/skills/cso/SKILL.md" ] && echo 1 || echo 0)
+HAS_CODEX=$(command -v codex >/dev/null 2>&1 && echo 1 || echo 0)
+CODEX_CFG=$([ -n "$GSTACK_BIN" ] && [ -x "$GSTACK_BIN/gstack-config" ] \
+  && "$GSTACK_BIN/gstack-config" get codex_reviews 2>/dev/null || echo unknown)
+[ -z "$CODEX_CFG" ] && CODEX_CFG=unknown
+
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+[ -z "$BASE" ] && BASE=main
+git fetch origin "$BASE" --quiet 2>/dev/null || true
+DIFF_BASE=$(git merge-base "origin/$BASE" HEAD 2>/dev/null || echo "")
+
+if [ -n "$DIFF_BASE" ]; then
+  AHEAD=$(git rev-list --count "$DIFF_BASE..HEAD")
+else
+  AHEAD=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo 0)
+fi
+
+STOP_REASON=""
+if [ -z "$INDEX_TREE" ]; then
+  STOP_REASON="unmerged_index"
+elif [ "$DIRTY" -eq 0 ] && [ "$AHEAD" -eq 0 ]; then
+  STOP_REASON="nothing_to_review"
+fi
+
+if [ -n "$STOP_REASON" ]; then
+  emit "=== FRESH-REVIEW PREFLIGHT ==="
+  emit "STATUS: stop"
+  emit "STOP_REASON: $STOP_REASON"
+  emit "BRANCH: $BRANCH"
+  emit "DIRTY: $DIRTY"
+  emit "AHEAD: $AHEAD"
+  emit "=== END ==="
+  exit 0
+fi
+
+if [ -n "$DIFF_BASE" ]; then
+  REVIEW_SCOPE="branch"
+  DIFF_CMD="git diff $DIFF_BASE"
+else
+  REVIEW_SCOPE="working"
+  DIFF_CMD="git diff HEAD"
+fi
+
+if grep -qx ".fresh-review/" "$REPO_ROOT/.gitignore" 2>/dev/null; then
+  REPORT_DIR="$REPO_ROOT/.fresh-review"
+else
+  REPORT_DIR="$(git rev-parse --absolute-git-dir)/fresh-review"
+fi
+LOG_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)/fresh-review"
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$(echo "$BRANCH" | tr '/' '-')"
+RUN_DIR="$REPORT_DIR/runs/$RUN_ID"
+mkdir -p "$RUN_DIR/packet" "$RUN_DIR/raw" "$LOG_DIR"
+
+STATE="$RUN_DIR/state.env"
+{
+  echo "REPO_ROOT='$REPO_ROOT'"
+  echo "RUN_ID='$RUN_ID'"
+  echo "RUN_DIR='$RUN_DIR'"
+  echo "REPORT_DIR='$REPORT_DIR'"
+  echo "LOG_DIR='$LOG_DIR'"
+  echo "BRANCH='$BRANCH'"
+  echo "DIRTY='$DIRTY'"
+  echo "AHEAD='$AHEAD'"
+  echo "BASE='$BASE'"
+  echo "DIFF_BASE='$DIFF_BASE'"
+  echo "INDEX_TREE='$INDEX_TREE'"
+  echo "GSTACK_BIN='$GSTACK_BIN'"
+  echo "HAS_GSTACK='$HAS_GSTACK'"
+  echo "HAS_CODEX='$HAS_CODEX'"
+  echo "CODEX_CFG='$CODEX_CFG'"
+  echo "REVIEW_SCOPE='$REVIEW_SCOPE'"
+  echo "DIFF_CMD='$DIFF_CMD'"
+  echo "TS_START='$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+  echo "T0='$(date +%s)'"
+} > "$STATE"
+
+emit "=== FRESH-REVIEW PREFLIGHT ==="
+emit "STATUS: ok"
+emit "RUN_DIR: $RUN_DIR"
+emit "STATE: $STATE"
+emit "BRANCH: $BRANCH"
+emit "DIRTY: $DIRTY"
+emit "AHEAD: $AHEAD"
+emit "BASE: $BASE"
+emit "DIFF_BASE: ${DIFF_BASE:-none}"
+emit "INDEX_TREE: $INDEX_TREE"
+emit "HAS_GSTACK: $HAS_GSTACK"
+emit "HAS_CODEX: $HAS_CODEX"
+emit "CODEX_CFG: $CODEX_CFG"
+emit "GSTACK_BIN: ${GSTACK_BIN:-none}"
+emit "REVIEW_SCOPE: $REVIEW_SCOPE"
+emit "DIFF_CMD: $DIFF_CMD"
+emit "=== END ==="
