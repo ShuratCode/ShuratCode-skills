@@ -53,8 +53,8 @@ that need a human are at the top. Verbose git output goes to the `LOG:` file.
 |---|---|
 | `FAILED` | fetch or merge errored — remote gone, no auth, timeout |
 | `DIVERGED` | local main has commits origin/main doesn't **and** vice versa — needs a human |
-| `SKIPPED` | dirty tree, unreadable status, no origin, no local target branch, submodule, or target held by a linked worktree |
-| `UPDATED` | fast-forwarded (`main +36`) |
+| `SKIPPED` | dirty tree (or dirty holding worktree), unreadable status, no origin, no local target branch, or submodule |
+| `UPDATED` | fast-forwarded — in place (`main +36`), by ref (`+12 in place (on feature/x)`), or inside the worktree holding the branch (`+3 in worktree …`) |
 | `CREATED` | local target branch created from origin (only with `--create`) |
 | `CURRENT` | already up to date |
 
@@ -85,7 +85,9 @@ fetched everything. Read the `LOG:` file only if the user wants to dig into a fa
 These are guarantees of the script, worth stating to the user when they hesitate:
 
 - **Never switches branches.** If a repo is checked out on `feature/x`, main is advanced
-  via `git fetch origin main:main`, which moves the ref without touching the worktree.
+  via `git fetch origin main:main`, which moves the ref without touching the worktree. If
+  main is checked out in a linked worktree, the fast-forward runs *in that worktree* — still
+  no branch switch anywhere.
 - **Never merges non-fast-forward.** `--ff-only` on the checked-out case; a plain ref
   fetch otherwise. Anything that isn't a fast-forward is reported as `DIVERGED`, untouched.
 - **Never touches a dirty tree.** Tracked-file modifications mean `SKIPPED`. Untracked
@@ -126,9 +128,16 @@ in the `LOG:` file's `Updating <old>..<new>` line.
   Capturing only stdout makes the failure indistinguishable from a clean tree, so the repo
   sails through the dirty gate and fails later at the merge. The check tests the exit status
   and reports `cannot read status` — fail closed, not open.
-- **If the target branch is checked out in a *linked* worktree, git refuses to fetch into
-  it.** That's reported as `SKIPPED  main is checked out in linked worktree <path>` rather
-  than `FAILED`, since nothing is broken — the branch is simply live somewhere else.
+- **If the target branch is checked out in a *linked* worktree, it gets fast-forwarded
+  there.** git refuses to fetch into a branch checked out anywhere, so the ref-fetch path is
+  unavailable — instead the merge runs inside the worktree that holds the branch, which is
+  the only place it has a working tree to move. Reported as
+  `UPDATED  main +3 in worktree ~/.cursor/worktrees/foo/abcd`. That worktree gets the same
+  dirty guard as any other checkout; if it has tracked modifications the repo is `SKIPPED`.
+- **`git worktree list` includes the primary worktree**, so for an ordinary repo sitting on
+  main the reported "holder" is the repo directory itself. The worktree branch is checked
+  only after the `cur == target` case has already returned, so a normal repo never reaches it
+  and there's no double handling. Only genuinely linked holders land there.
 - **`CURRENT` can still mean "you have unpushed work."** The detail reads
   `main up to date (13 unpushed)` — nothing to pull, but the branch is ahead.
 - **A repo whose GitHub remote was renamed or deleted shows up as `FAILED` with

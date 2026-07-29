@@ -59,8 +59,16 @@ linked worktrees (the Cursor / `.claude/worktrees` pattern).
   The check now tests the exit status and reports `cannot read status`.
 
 Handled while in there: if the target branch is checked out in a *linked* worktree, git
-refuses to fetch into it. That's now `SKIPPED  <branch> is checked out in linked worktree
-<path>` rather than `FAILED` — nothing is broken, the branch is just live elsewhere.
+refuses to fetch into it, so the ref-fetch path is unavailable. The fast-forward runs inside
+the worktree that holds the branch instead — the only place it has a working tree to move —
+and reports `UPDATED  main +3 in worktree ~/.cursor/worktrees/foo/abcd`. That worktree gets
+the same dirty guard as any other checkout, so a holder with tracked modifications is
+`SKIPPED` with its edits intact.
+
+Note that `git worktree list` includes the *primary* worktree, so on an ordinary repo sitting
+on main the reported holder is the repo directory itself. The worktree lookup runs only after
+the `cur == target` case has returned, so normal repos never reach it and nothing is handled
+twice; only genuinely linked holders take that path.
 
 Both shapes are now permanent fixtures. Verified on the work tree: 9 repos fast-forwarded to
 land exactly on `origin/*`, a repo on `docs/add-agents-md` kept its branch and worktree, the

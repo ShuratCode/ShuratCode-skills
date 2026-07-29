@@ -108,6 +108,13 @@ relpath() {
   printf '%s' "$p"
 }
 
+# Worktrees routinely live outside ROOT (~/.cursor/worktrees/…), so relpath can't shorten
+# them; collapse $HOME to ~ instead of printing a 70-column absolute path in the summary.
+pretty() {
+  local p; p="$(relpath "$1")"
+  case "$p" in /*) printf '%s' "${p/#$HOME/~}" ;; *) printf '%s' "$p" ;; esac
+}
+
 emit() { printf '%s\t%s\t%s\n' "$1" "$(relpath "$2")" "$3" >"$RESULTS/$4"; }
 
 process_repo() {
@@ -203,13 +210,34 @@ process_repo() {
     return
   fi
 
-  # target is not checked out here, but a linked worktree may hold it — git refuses to
-  # fetch into a branch checked out anywhere, so say so instead of reporting FAILED.
+  # The target may be checked out in a linked worktree. git refuses to fetch into a branch
+  # that is checked out anywhere, so update it where it actually lives: fast-forward inside
+  # that worktree, which is the only place the branch has a working tree to move.
   local wt
   wt="$(git -C "$repo" worktree list --porcelain 2>/dev/null \
-        | awk -v b="branch refs/heads/$target" '$0=="worktree"{w=""} /^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
+        | awk -v b="branch refs/heads/$target" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   if [ -n "$wt" ]; then
-    emit SKIPPED "$repo" "$target is checked out in linked worktree $wt ($behind behind)" "$slot"; return
+    if [ ! -d "$wt" ]; then
+      emit SKIPPED "$repo" "$target held by missing worktree $(pretty "$wt") — run git worktree prune" "$slot"; return
+    fi
+    local wst
+    if ! wst="$(git -C "$wt" status --porcelain --untracked-files=no 2>>"$LOG")"; then
+      emit SKIPPED "$repo" "cannot read status in worktree $(pretty "$wt")" "$slot"; return
+    fi
+    if [ -n "$wst" ]; then
+      emit SKIPPED "$repo" "dirty worktree $(pretty "$wt") holds $target ($behind behind)" "$slot"; return
+    fi
+    if [ "$DRY" -eq 1 ]; then
+      emit UPDATED "$repo" "would fast-forward $target +$behind in worktree $(pretty "$wt")" "$slot"; return
+    fi
+    if out="$(git -C "$wt" merge --ff-only "origin/$target" 2>&1)"; then
+      printf '%s\n' "$out" >>"$LOG"
+      emit UPDATED "$repo" "$target +$behind in worktree $(pretty "$wt")" "$slot"
+    else
+      printf '%s\n' "$out" >>"$LOG"
+      emit FAILED "$repo" "ff-only merge in worktree $(pretty "$wt") failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-90)" "$slot"
+    fi
+    return
   fi
 
   # target is not checked out: move the local ref without touching the worktree
