@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.0 — 2026-07-29
+
+### New plugin: `pull-all` 0.1.0
+
+`/pull-all <path>` walks a directory tree, finds every git repo under it, and brings each
+one's main branch up to date with origin — in parallel, with one summary block instead of
+per-repo git noise. `plugins/everything` 0.1.0 → 0.2.0 to pick it up.
+
+The work is in `scripts/pull-all.sh`; the skill is its man page. Semantics that fell out of
+testing against a fixture tree covering clean / dirty / detached / diverged / `master`-default
+/ no-remote / submodule / no-local-main repos:
+
+- **Never switches branches.** A repo checked out on `feature/x` gets its main advanced via
+  `git fetch origin main:main`, which moves the ref without touching the worktree. Verified:
+  the branch stays `feature/x` and the working file stays at its pre-update content while
+  `main` lands exactly on `origin/main`.
+- **Never merges non-fast-forward.** `merge --ff-only` for the checked-out case, a plain ref
+  fetch otherwise. Ahead-*and*-behind is reported `DIVERGED` and left alone.
+- **Never touches a dirty tree** (tracked modifications ⇒ `SKIPPED`; untracked files are
+  ignored, since they don't block a fast-forward).
+- **`git pull` is never invoked**, so a configured `pull.rebase` can't change behavior.
+- Statuses sort worst-first — `FAILED`, `DIVERGED`, `SKIPPED`, then `UPDATED` / `CREATED` /
+  `CURRENT` — so the lines needing a human are at the top of what the agent reads.
+
+Two defaults exist because the first real scan of `~` got them wrong:
+
+- **Dot-directories are pruned.** Without that, a `~` scan finds `~/.nvm` and `~/.oh-my-zsh`
+  and offers to update them. `~/.nvm` sits at a detached HEAD, so it would have grown a local
+  `master` branch it never had. `--hidden` opts back in.
+- **A missing target branch is `SKIPPED`, not created.** Creating branches in a repo that
+  deliberately has none is the surprising choice; the fetch already refreshed `origin/main`,
+  so there is nothing lost. `--create` opts in.
+
+The find expression is `\( -name '.[^.]*' ! -name .git \) -prune -o -name .git -print`. The
+`! -name .git` is load-bearing — `.git` is itself a dot-name, so pruning dot-dirs without the
+exclusion prunes every repo before `-print` sees it and the script silently reports zero repos.
+
+Written for bash 3.2 (macOS `/bin/bash`): no associative arrays, no `wait -n`, no `mapfile`.
+The `-j` throttle polls `jobs -rp`, and the per-repo network timeout is a hand-rolled
+background-and-poll helper rather than `timeout(1)`, which macOS doesn't ship. `GIT_TERMINAL_PROMPT=0`
+plus `ssh -o BatchMode=yes` mean an auth-requiring remote fails fast instead of hanging on a prompt.
+
 ## 0.3.1 — 2026-07-27
 
 ### `fresh-review` 0.2.0 → 0.2.1

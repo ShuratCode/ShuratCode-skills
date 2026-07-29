@@ -8,8 +8,8 @@ format. Chat is the odd one out: it has no marketplace and takes zip uploads onl
 
 | Surface | Install path | Skills available |
 |---|---|---|
-| Claude Code | `/plugin marketplace add` | all 3 |
-| Claude Desktop (Cowork) | Plugins page → Add marketplace | all 3 |
+| Claude Code | `/plugin marketplace add` | all 4 |
+| Claude Desktop (Cowork) | Plugins page → Add marketplace | all 4 |
 | claude.ai Chat | zip upload | `restaurant-search` only |
 
 ## Skills
@@ -18,8 +18,9 @@ format. Chat is the odd one out: it has no marketplace and takes zip uploads onl
 |---|---|---|
 | **fresh-review** | Pre-commit review with enforced producer/reviewer context separation. Runs the lattice review, the gstack review, and the gstack security audit against the current diff via context-isolated subagents, then triages findings back where intent is known. | `lattice` (auto-installed), gstack (manual) |
 | **upgrade-all** | One-shot local maintenance: Homebrew formulas + casks + cleanup, gstack upgrade with migrations, and `claude plugins update` for lattice / aws-core / sparkpilot. Prints one summary block instead of streaming every command. | Homebrew, gstack, `claude` CLI — all optional, each degrades to `SKIPPED` |
+| **pull-all** | Point it at a directory; it finds every git repo underneath and fast-forwards each one's main branch from origin, in parallel. Never switches branches, never merges non-fast-forward, never touches a dirty tree. Reports one worst-first line per repo. | git |
 | **restaurant-search** | Finds restaurants through three gates — in the right area, verifiably open at the target time in the *restaurant's* timezone, and with a menu that verifiably contains a qualifying dish. Never fills gaps with plausible guesses. | nothing |
-| **everything** | Meta-plugin with no skills of its own. Installing it pulls in all three. | — |
+| **everything** | Meta-plugin with no skills of its own. Installing it pulls in all four. | — |
 
 ## Install — Claude Code
 
@@ -72,8 +73,8 @@ Both skills degrade honestly instead of pretending. See [CHANGELOG.md](CHANGELOG
 Same repo, same manifest. On the Plugins page choose **Add marketplace** and enter either
 `ShuratCode/ShuratCode-skills` or the full `https://github.com/ShuratCode/ShuratCode-skills`.
 
-Note that `fresh-review` and `upgrade-all` need a real shell, git, and a local checkout, so
-they are only meaningful in a Cowork session with filesystem access.
+Note that `fresh-review`, `upgrade-all`, and `pull-all` need a real shell, git, and a local
+checkout, so they are only meaningful in a Cowork session with filesystem access.
 
 ## Install — claude.ai Chat
 
@@ -87,9 +88,10 @@ They aren't used in Chat."). Build the zips:
 Then upload `dist/chat-skills/<skill>.zip` at <https://claude.ai/customize/skills> →
 **+** → **Create skill** → **Upload a skill**.
 
-Only `restaurant-search` ships to Chat. `fresh-review` and `upgrade-all` need bash against
-*your* machine, git, and subagents; the Chat sandbox is isolated from your filesystem and
-has no subagent primitive, so porting them would produce skills that silently fail.
+Only `restaurant-search` ships to Chat. `fresh-review`, `upgrade-all`, and `pull-all` need
+bash against *your* machine, git, and subagents; the Chat sandbox is isolated from your
+filesystem and has no subagent primitive, so porting them would produce skills that
+silently fail.
 
 The Chat copy of `restaurant-search` is a genuine variant, not the same file: claude.ai caps
 `description` at **200 characters** where Claude Code allows far more, so the trigger text is
