@@ -210,34 +210,15 @@ process_repo() {
     return
   fi
 
-  # The target may be checked out in a linked worktree. git refuses to fetch into a branch
-  # that is checked out anywhere, so update it where it actually lives: fast-forward inside
-  # that worktree, which is the only place the branch has a working tree to move.
+  # Only the primary worktree is ever updated. If the target is checked out in a *linked*
+  # worktree (.claude/worktrees/*, ~/.cursor/worktrees/*), leave it strictly alone: those are
+  # someone's in-flight task checkouts, not a repo to freshen. git also refuses to fetch into
+  # a branch checked out anywhere, so there is nothing safe to do here — report and move on.
   local wt
   wt="$(git -C "$repo" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/$target" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   if [ -n "$wt" ]; then
-    if [ ! -d "$wt" ]; then
-      emit SKIPPED "$repo" "$target held by missing worktree $(pretty "$wt") — run git worktree prune" "$slot"; return
-    fi
-    local wst
-    if ! wst="$(git -C "$wt" status --porcelain --untracked-files=no 2>>"$LOG")"; then
-      emit SKIPPED "$repo" "cannot read status in worktree $(pretty "$wt")" "$slot"; return
-    fi
-    if [ -n "$wst" ]; then
-      emit SKIPPED "$repo" "dirty worktree $(pretty "$wt") holds $target ($behind behind)" "$slot"; return
-    fi
-    if [ "$DRY" -eq 1 ]; then
-      emit UPDATED "$repo" "would fast-forward $target +$behind in worktree $(pretty "$wt")" "$slot"; return
-    fi
-    if out="$(git -C "$wt" merge --ff-only "origin/$target" 2>&1)"; then
-      printf '%s\n' "$out" >>"$LOG"
-      emit UPDATED "$repo" "$target +$behind in worktree $(pretty "$wt")" "$slot"
-    else
-      printf '%s\n' "$out" >>"$LOG"
-      emit FAILED "$repo" "ff-only merge in worktree $(pretty "$wt") failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-90)" "$slot"
-    fi
-    return
+    emit SKIPPED "$repo" "$target is checked out in linked worktree $(pretty "$wt") ($behind behind)" "$slot"; return
   fi
 
   # target is not checked out: move the local ref without touching the worktree

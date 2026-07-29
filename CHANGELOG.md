@@ -58,17 +58,18 @@ linked worktrees (the Cursor / `.claude/worktrees` pattern).
   the same fail-open would have mattered more in a repo where the merge could have succeeded.
   The check now tests the exit status and reports `cannot read status`.
 
-Handled while in there: if the target branch is checked out in a *linked* worktree, git
-refuses to fetch into it, so the ref-fetch path is unavailable. The fast-forward runs inside
-the worktree that holds the branch instead — the only place it has a working tree to move —
-and reports `UPDATED  main +3 in worktree ~/.cursor/worktrees/foo/abcd`. That worktree gets
-the same dirty guard as any other checkout, so a holder with tracked modifications is
-`SKIPPED` with its edits intact.
+**Only the primary worktree is ever written to.** Nothing under `<repo>/.claude/worktrees/*`
+or `~/.cursor/worktrees/*` is touched — those are in-flight task checkouts belonging to an
+open session, not repos to freshen. Two layers enforce it: discovery reports a `.git` *file*
+as `SKIPPED  submodule or linked worktree`, and a repo whose target branch turns out to be
+checked out in a linked worktree is `SKIPPED  <branch> is checked out in linked worktree
+<path>`. git also refuses to fetch into a branch checked out anywhere, so there is no safe
+action in that case regardless.
 
 Note that `git worktree list` includes the *primary* worktree, so on an ordinary repo sitting
-on main the reported holder is the repo directory itself. The worktree lookup runs only after
-the `cur == target` case has returned, so normal repos never reach it and nothing is handled
-twice; only genuinely linked holders take that path.
+on main the reported holder is the repo directory itself. The lookup runs only after the
+`cur == target` case has returned, so normal repos never reach it and are never mistaken for
+a linked holder.
 
 Both shapes are now permanent fixtures. Verified on the work tree: 9 repos fast-forwarded to
 land exactly on `origin/*`, a repo on `docs/add-agents-md` kept its branch and worktree, the

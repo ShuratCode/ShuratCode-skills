@@ -53,8 +53,8 @@ that need a human are at the top. Verbose git output goes to the `LOG:` file.
 |---|---|
 | `FAILED` | fetch or merge errored — remote gone, no auth, timeout |
 | `DIVERGED` | local main has commits origin/main doesn't **and** vice versa — needs a human |
-| `SKIPPED` | dirty tree (or dirty holding worktree), unreadable status, no origin, no local target branch, or submodule |
-| `UPDATED` | fast-forwarded — in place (`main +36`), by ref (`+12 in place (on feature/x)`), or inside the worktree holding the branch (`+3 in worktree …`) |
+| `SKIPPED` | dirty tree, unreadable status, no origin, no local target branch, submodule, or target held by a linked worktree |
+| `UPDATED` | fast-forwarded — by merge (`main +36`) or by ref move (`+12 in place (on feature/x)`) |
 | `CREATED` | local target branch created from origin (only with `--create`) |
 | `CURRENT` | already up to date |
 
@@ -85,9 +85,10 @@ fetched everything. Read the `LOG:` file only if the user wants to dig into a fa
 These are guarantees of the script, worth stating to the user when they hesitate:
 
 - **Never switches branches.** If a repo is checked out on `feature/x`, main is advanced
-  via `git fetch origin main:main`, which moves the ref without touching the worktree. If
-  main is checked out in a linked worktree, the fast-forward runs *in that worktree* — still
-  no branch switch anywhere.
+  via `git fetch origin main:main`, which moves the ref without touching the worktree.
+- **Only ever writes to the primary worktree.** Linked worktrees — `.claude/worktrees/*`,
+  `~/.cursor/worktrees/*` — are never updated, and a repo whose target branch is checked out
+  in one is `SKIPPED`.
 - **Never merges non-fast-forward.** `--ff-only` on the checked-out case; a plain ref
   fetch otherwise. Anything that isn't a fast-forward is reported as `DIVERGED`, untouched.
 - **Never touches a dirty tree.** Tracked-file modifications mean `SKIPPED`. Untracked
@@ -128,16 +129,18 @@ in the `LOG:` file's `Updating <old>..<new>` line.
   Capturing only stdout makes the failure indistinguishable from a clean tree, so the repo
   sails through the dirty gate and fails later at the merge. The check tests the exit status
   and reports `cannot read status` — fail closed, not open.
-- **If the target branch is checked out in a *linked* worktree, it gets fast-forwarded
-  there.** git refuses to fetch into a branch checked out anywhere, so the ref-fetch path is
-  unavailable — instead the merge runs inside the worktree that holds the branch, which is
-  the only place it has a working tree to move. Reported as
-  `UPDATED  main +3 in worktree ~/.cursor/worktrees/foo/abcd`. That worktree gets the same
-  dirty guard as any other checkout; if it has tracked modifications the repo is `SKIPPED`.
+- **Linked worktrees are never updated — only the primary repo directory is.** Nothing under
+  `<repo>/.claude/worktrees/*` or `~/.cursor/worktrees/*` is ever written to. Those are
+  in-flight task checkouts belonging to someone's open session, not repos to freshen. Two
+  layers enforce it: discovery treats a `.git` *file* as `SKIPPED  submodule or linked
+  worktree`, and when the target branch turns out to be checked out in a linked worktree the
+  repo is `SKIPPED  main is checked out in linked worktree <path>` rather than updated there.
+  (git also refuses to fetch into a branch checked out anywhere, so there is no safe action
+  in that case regardless.)
 - **`git worktree list` includes the primary worktree**, so for an ordinary repo sitting on
   main the reported "holder" is the repo directory itself. The worktree branch is checked
   only after the `cur == target` case has already returned, so a normal repo never reaches it
-  and there's no double handling. Only genuinely linked holders land there.
+  and is never mistaken for a linked holder.
 - **`CURRENT` can still mean "you have unpushed work."** The detail reads
   `main up to date (13 unpushed)` — nothing to pull, but the branch is ahead.
 - **A repo whose GitHub remote was renamed or deleted shows up as `FAILED` with
