@@ -36,22 +36,39 @@ READER="$HOME/.claude/skills/gstack/bin/gstack-review-read"
 [ -x "$READER" ] || emit_none "no_gstack_review_read"
 
 # The reader appends a ---CONFIG--- trailer after the entries; stop before it.
-FR_LINE=$("$READER" 2>/dev/null | sed -n '/---CONFIG---/q;p' \
-  | grep '"skill":"fresh-review"' | tail -1)
-[ -n "$FR_LINE" ] || emit_none "no_fresh_review_entry"
-
-read -r TS COMMIT PASSES < <(python3 - "$FR_LINE" <<'PY'
+# Selection parses each line rather than grepping the raw text: fr-handoff.sh writes
+# the entry with json.dumps defaults ('"skill": "fresh-review"'), so a text match on
+# the compact spelling never fires and every resolution silently degrades to none.
+# `python3 -c "$SELECT"`, not `python3 - <<PY`: the latter's heredoc claims stdin and
+# the piped entries never arrive.
+SELECT_LAST=$(cat <<'PY'
 import json, sys
-try:
-    e = json.loads(sys.argv[1])
-except Exception:
-    print("- - -")
-    sys.exit(0)
-print(e.get("timestamp") or "-", e.get("commit") or "-", e.get("passes") or "-")
+
+last = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        entry = json.loads(line)
+    except Exception:
+        continue
+    if isinstance(entry, dict) and entry.get("skill") == "fresh-review":
+        last = entry
+
+if last is None:
+    print("no - - -")
+else:
+    print("yes", last.get("timestamp") or "-", last.get("commit") or "-",
+          last.get("passes") or "-")
 PY
 )
 
-[ "$TS" != "-" ] || emit_none "entry_unparseable"
+read -r FOUND TS COMMIT PASSES < <("$READER" 2>/dev/null | sed -n '/---CONFIG---/q;p' \
+  | python3 -c "$SELECT_LAST")
+
+[ "${FOUND:-no}" = "yes" ] || emit_none "no_fresh_review_entry"
+[ "$TS" != "-" ] && [ -n "$TS" ] || emit_none "entry_has_no_timestamp"
 [ "$PASSES" != "-" ] && [ -n "$PASSES" ] || emit_none "entry_has_no_passes_field"
 
 AGE_H=$(python3 - "$TS" <<'PY'
