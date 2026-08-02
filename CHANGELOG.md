@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.4.1 — 2026-08-02
+
+### `fresh-review` 0.3.0 → 0.3.1
+
+**The ship dispatch gate never matched its own review-log entry, so the whole optimization was
+silently discarded.** `fr-handoff.sh` builds the handoff payload with `json.dumps`, whose default
+separator emits `"skill": "fresh-review"` — with a space. `fr-ship-gate.sh` grepped the raw reader
+output for the compact spelling `"skill":"fresh-review"`. It never matched, so every invocation
+fell through to `no_fresh_review_entry` → `FR_GATE: none` with all four `CUT_*` flags at `no`.
+
+The failure mode is the expensive kind: `none` is also the correct answer when there genuinely is
+no recent run, so a gate that *always* returns `none` looks exactly like a gate that is working
+and simply has nothing to trim. `/ship` paid for the full Step 9 specialist army on every run
+that a fresh-review had already covered. The gate has been inert since it was introduced in 0.3.0.
+
+Fixed by selecting the entry from *parsed* JSON — read each line, compare the `skill` field —
+instead of text-matching one particular serialization. Writer spacing can no longer break it.
+Reported by a session that reproduced the script's logic with a whitespace-tolerant match and got
+the true tier (`tier1`) the gate should have returned.
+
+Two notes for anyone editing that block:
+
+- The selector is fed via `python3 -c "$SELECT_LAST"`, **not** `python3 - <<PY`. The heredoc form
+  claims stdin, so the piped entries never arrive and the gate returns `none` again — which is
+  what the first attempt at this fix did, caught only because the fixtures assert on the tier
+  rather than on "the script ran".
+- `entry_unparseable` is now `entry_has_no_timestamp`; a corrupt line is skipped during selection
+  and falls through to `no_fresh_review_entry`. Both still resolve to `FR_GATE: none`, which
+  remains the only safe default — a missed trim costs duplicated work, a wrong trim drops a lens.
+
+Verified against fake `gstack-review-read` fixtures: spaced JSON (the real writer format) resolves
+`tier1` on a drifted tree and `tier2` on a clean identical tree including `CUT_CODEX_ADVERSARIAL`,
+`passes: lattice` alone leaves both Codex cuts at `no`, a dead checkpoint commit gives
+`checkpoint_commit_gone`, and the five failure paths each degrade to `none` with a distinct
+reason. Before the fix, all three success cases returned `none`.
+
+**This release also finally delivers 0.4.0's `.lattice/context/**` fix, which had never reached a
+single machine.** `claude plugins update` refreshes the marketplace clone but extracts into a
+cache keyed on the `version` in `plugins/<name>/.claude-plugin/plugin.json`. PR #8 changed
+`SKILL.md` without bumping that version, so `update` compared 0.3.0 to 0.3.0, reported `CURRENT`,
+and left the stale cache in place — the forbidden-reads list running on disk still omitted
+`.lattice/context/**`. Both fixes ship together here because the bump is what makes either of
+them real.
+
+The rule this implies: **a content-only change to a plugin is not shipped until its `version` is
+bumped.** `CURRENT` in an upgrade summary means "the cached version string matches", not "you are
+running the merged code".
+
 ## 0.4.0 — 2026-07-29
 
 ### New plugin: `pull-all` 0.1.0
