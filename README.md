@@ -102,8 +102,32 @@ fork can't quietly widen.
 
 ```bash
 ./scripts/validate.sh          # lint everything
+./scripts/test.sh              # run every plugins/*/tests/test-*.sh
+./scripts/check-release.sh     # fail if a plugin changed without a version bump
 ./scripts/build-chat-skills.sh # package chat zips into dist/
 ```
+
+### Merging
+
+`main` is protected by a ruleset: **no direct pushes, and the `check` job in
+`.github/workflows/ci.yml` must pass before a PR can merge.** It runs `validate.sh`, `test.sh`,
+and `check-release.sh`. There are no bypass actors, so the rule applies to the repo owner too —
+a red build blocks the merge button rather than warning about it. Branches must also be up to
+date with `main` before merging, so a stale PR can't pass the release gate against a base that
+has since moved.
+
+Reviews are *not* required (`required_approving_review_count: 0`), since this is a solo repo.
+
+### Releasing
+
+**A change to a plugin isn't shipped until its `version` is bumped.** `claude plugins update`
+extracts into a cache keyed on `plugins/<name>/.claude-plugin/plugin.json`'s `version`; if that
+string is unchanged the updater reports `CURRENT` and leaves the stale copy in place, so merged
+code never reaches a machine. `check-release.sh` enforces this, plus the marketplace version bump
+and CHANGELOG entry that go with it. Changes confined to `plugins/<name>/tests/` are exempt.
+
+Note that `claude plugin validate --strict` cannot catch this — it checks manifest shape, not
+delivery. Every manifest here passed it during the two releases that shipped nothing.
 
 `validate.sh` fails on:
 
