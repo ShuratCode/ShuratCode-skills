@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.4.2 — 2026-08-02
+
+### Repo tooling: CI, a release gate, and the first plugin test suite
+
+0.4.1 shipped two fixes that had been merged and silently undelivered. Nothing in the repo
+could have caught either one — there was no CI at all, and `scripts/validate.sh` checks manifest
+*shape*, not release *delivery*. Both gaps are now closed.
+
+**`scripts/check-release.sh` — the release gate.** Diffs the working tree against the merge-base
+with the target branch and fails when a plugin's files changed without an increase to
+`plugins/<name>/.claude-plugin/plugin.json`'s `version`. Replayed against history, it blocks PR #8
+and PR #9 — the two merges that shipped nothing — and passes PR #10, the bump that finally
+delivered them. It also enforces the two adjacent conventions (marketplace version bump,
+CHANGELOG entry) and rejects a `version` key duplicated into a marketplace entry, which can only
+ever drift because Claude Code always reads plugin.json's value.
+
+Two deliberate exemptions, both there to keep the gate credible rather than ignored:
+
+- **Test-only changes need no bump.** `tests/` ships in the cache but cannot change installed
+  behavior, and forcing a release for a test edit is the fastest way to train everyone to click
+  past the failure. Matches how changesets and semantic-release treat them.
+- **The gate is PR-only.** On a push to `main` the merge-base is `HEAD`, so it would compare
+  nothing against nothing and pass vacuously.
+
+**`plugins/fresh-review/tests/test-ship-gate.sh` — 26 assertions on `fr-ship-gate.sh`.** Every
+assertion is on the resolved *tier*, never on "the script exited 0", because the bug it exists to
+catch produced a perfectly well-formed `FR_GATE: none` — the same answer the gate legitimately
+gives when there is no recent run. Confirmed to fail 13 of 26 against the pre-fix script and pass
+26 of 26 after. Fixtures are built with `json.dumps`, the same serializer `fr-handoff.sh` uses, so
+they track the writer instead of restating a guess about it.
+
+**`scripts/test.sh`** runs every `plugins/*/tests/test-*.sh`. **`.github/workflows/ci.yml`** runs
+validate, tests, and the release gate on every PR — with `fetch-depth: 0`, without which the
+merge-base does not exist in a shallow clone and the gate cannot resolve a base.
+
+**`scripts/validate.sh`** now also runs `claude plugin validate --strict` over the marketplace and
+every plugin, skipped where the CLI is absent. It catches schema drift this repo does not model,
+but note what it did *not* catch: all six manifests passed `--strict` throughout the entire period
+both fixes were undelivered.
+
 ## 0.4.1 — 2026-08-02
 
 ### `fresh-review` 0.3.0 → 0.3.1

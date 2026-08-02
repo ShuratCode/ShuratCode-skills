@@ -28,6 +28,23 @@ done < <(find .claude-plugin plugins -name '*.json' 2>/dev/null | sort)
 
 [ "$FAIL" -eq 1 ] && { echo; echo "Invalid JSON — stopping."; exit 1; }
 
+# --- 1b. Official manifest validator ----------------------------------------
+# Catches schema drift this script does not model. Skipped where the CLI is
+# absent (CI) rather than installed on the fly — it needs no auth, but pinning a
+# CLI version into CI would make the build fail on unrelated upstream changes.
+head_ "claude plugin validate --strict"
+if command -v claude >/dev/null 2>&1; then
+  for p in . plugins/*/; do
+    if out=$(claude plugin validate "$p" --strict 2>&1); then
+      ok "$p"
+    else
+      err "$p — $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+    fi
+  done
+else
+  warn "claude CLI not on PATH — skipping (run locally before publishing)"
+fi
+
 # --- 2. Schema + cross-reference + frontmatter ------------------------------
 python3 - <<'PY'
 import json, os, re, sys, pathlib

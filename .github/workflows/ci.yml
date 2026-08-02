@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — check-release.sh needs the merge-base with the target
+      # branch. The default shallow clone has no such commit and the gate cannot
+      # resolve a base.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate manifests and skills
+        run: bash scripts/validate.sh
+
+      - name: Run plugin tests
+        run: bash scripts/test.sh
+
+      # PR-only: on a push to main the merge-base is HEAD, so there is nothing
+      # to compare and the gate would always trivially pass.
+      - name: Release gate (version bump required)
+        if: github.event_name == 'pull_request'
+        run: bash scripts/check-release.sh "origin/${{ github.base_ref }}"
