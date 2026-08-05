@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# fr-preflight.sh — Step 1 + Step 2. Probes the repo, resolves the review scope,
-# creates the run directory, and writes the state file every later script reads.
+# fr-preflight.sh [--mode review|pr] [--pr <number|url>] — Step 1 + Step 2.
+# Probes the repo, resolves the review scope, creates the run directory, and
+# writes the state file every later script reads.
+#
+# --mode selects the output shape: `review` is findings only, `pr` adds the
+# narrative pass. --pr implies --mode pr and additionally moves the subject of
+# the review off the local branch, at which point scope resolution is finished by
+# fr-pr-resolve.sh rather than here.
 #
 # Output contract (stdout): one block, keys only, no diff content.
 #   === FRESH-REVIEW PREFLIGHT ===
 #   STATUS: ok | stop
 #   STOP_REASON: <slug>            (only when STATUS: stop)
-#   RUN_DIR / STATE / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE / INDEX_TREE
-#   HAS_GSTACK / HAS_CODEX / CODEX_CFG / GSTACK_BIN / REVIEW_SCOPE / DIFF_CMD
+#   RUN_DIR / STATE / MODE / PR_REF / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE
+#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_CFG / GSTACK_BIN
+#   SOURCE_ROOT / REVIEW_SCOPE / DIFF_CMD
 #   === END ===
 #
 # Exit 0 with STATUS: stop is a normal, expected outcome — the caller reads
@@ -16,6 +23,20 @@
 set -u
 
 emit() { printf '%s\n' "$1"; }
+
+MODE=review
+PR_REF=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
+    --pr)   PR_REF="${2:?--pr needs a value}"; MODE=pr; shift 2 ;;
+    *)      echo "fr-preflight: unknown argument '$1'" >&2; exit 2 ;;
+  esac
+done
+case "$MODE" in
+  review|pr) : ;;
+  *) echo "fr-preflight: --mode must be review or pr, got '$MODE'" >&2; exit 2 ;;
+esac
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   emit "=== FRESH-REVIEW PREFLIGHT ==="
@@ -38,6 +59,7 @@ GSTACK_BIN="${GSTACK_ROOT:+$GSTACK_ROOT/bin}"
 
 HAS_GSTACK=$([ -f "$HOME/.claude/skills/cso/SKILL.md" ] && echo 1 || echo 0)
 HAS_CODEX=$(command -v codex >/dev/null 2>&1 && echo 1 || echo 0)
+HAS_GH=$(command -v gh >/dev/null 2>&1 && echo 1 || echo 0)
 CODEX_CFG=$([ -n "$GSTACK_BIN" ] && [ -x "$GSTACK_BIN/gstack-config" ] \
   && "$GSTACK_BIN/gstack-config" get codex_reviews 2>/dev/null || echo unknown)
 [ -z "$CODEX_CFG" ] && CODEX_CFG=unknown
@@ -53,8 +75,14 @@ else
   AHEAD=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo 0)
 fi
 
+# Both stop conditions are statements about the *local* tree, and with --pr the
+# local tree is not the subject of the review: a clean checkout on main is the
+# normal state from which you review someone else's PR, and a conflicted index
+# never gets touched because this mode neither stages nor commits.
 STOP_REASON=""
-if [ -z "$INDEX_TREE" ]; then
+if [ -n "$PR_REF" ]; then
+  :
+elif [ -z "$INDEX_TREE" ]; then
   STOP_REASON="unmerged_index"
 elif [ "$DIRTY" -eq 0 ] && [ "$AHEAD" -eq 0 ]; then
   STOP_REASON="nothing_to_review"
@@ -85,13 +113,24 @@ else
   REPORT_DIR="$(git rev-parse --absolute-git-dir)/fresh-review"
 fi
 LOG_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)/fresh-review"
-RUN_ID="$(date +%Y%m%d-%H%M%S)-$(echo "$BRANCH" | tr '/' '-')"
+# A --pr run names itself after the PR, not after whatever branch happened to be
+# checked out — the local branch is incidental there and makes the run directory
+# unfindable afterwards.
+if [ -n "$PR_REF" ]; then
+  RUN_SLUG="pr-$(printf '%s' "$PR_REF" | grep -oE '[0-9]+$' || echo ref)"
+else
+  RUN_SLUG="$(echo "$BRANCH" | tr '/' '-')"
+fi
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$RUN_SLUG"
 RUN_DIR="$REPORT_DIR/runs/$RUN_ID"
 mkdir -p "$RUN_DIR/packet" "$RUN_DIR/raw" "$LOG_DIR"
 
 STATE="$RUN_DIR/state.env"
 {
   echo "REPO_ROOT='$REPO_ROOT'"
+  echo "SOURCE_ROOT='$REPO_ROOT'"
+  echo "MODE='$MODE'"
+  printf "PR_REF='%s'\n" "$(printf '%s' "$PR_REF" | sed "s/'/'\\\\''/g")"
   echo "RUN_ID='$RUN_ID'"
   echo "RUN_DIR='$RUN_DIR'"
   echo "REPORT_DIR='$REPORT_DIR'"
@@ -105,6 +144,7 @@ STATE="$RUN_DIR/state.env"
   echo "GSTACK_BIN='$GSTACK_BIN'"
   echo "HAS_GSTACK='$HAS_GSTACK'"
   echo "HAS_CODEX='$HAS_CODEX'"
+  echo "HAS_GH='$HAS_GH'"
   echo "CODEX_CFG='$CODEX_CFG'"
   echo "REVIEW_SCOPE='$REVIEW_SCOPE'"
   echo "DIFF_CMD='$DIFF_CMD'"
@@ -116,6 +156,8 @@ emit "=== FRESH-REVIEW PREFLIGHT ==="
 emit "STATUS: ok"
 emit "RUN_DIR: $RUN_DIR"
 emit "STATE: $STATE"
+emit "MODE: $MODE"
+emit "PR_REF: ${PR_REF:-none}"
 emit "BRANCH: $BRANCH"
 emit "DIRTY: $DIRTY"
 emit "AHEAD: $AHEAD"
@@ -124,8 +166,10 @@ emit "DIFF_BASE: ${DIFF_BASE:-none}"
 emit "INDEX_TREE: $INDEX_TREE"
 emit "HAS_GSTACK: $HAS_GSTACK"
 emit "HAS_CODEX: $HAS_CODEX"
+emit "HAS_GH: $HAS_GH"
 emit "CODEX_CFG: $CODEX_CFG"
 emit "GSTACK_BIN: ${GSTACK_BIN:-none}"
+emit "SOURCE_ROOT: $REPO_ROOT"
 emit "REVIEW_SCOPE: $REVIEW_SCOPE"
 emit "DIFF_CMD: $DIFF_CMD"
 emit "=== END ==="

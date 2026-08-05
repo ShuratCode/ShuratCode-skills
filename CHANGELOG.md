@@ -1,5 +1,97 @@
 # Changelog
 
+## 0.5.0 — 2026-08-05
+
+### `fresh-review` 0.3.1 → 0.4.0: a PR review mode that explains the change in plain English
+
+fresh-review had one mode and one product: a verdict and a list of findings. It answered *is this
+correct* and never *what is this*. The new `pr` mode adds the second answer — a plain-English
+account of what a change does, at the altitude of someone who owns the product and does not read
+code, written in the repo's own domain vocabulary rather than in file paths and function names.
+
+**It reviews *and* narrates.** The narrative is a fourth pass added to the existing three, not a
+cheaper substitute for them. A summary that has not been reviewed is how a change gets waved
+through on the strength of a good description.
+
+**The narrator is isolated exactly as hard as the critics are.** Commit messages, PR titles, plans,
+and design docs are all forbidden to it. That looks perverse for a summarizer — the intent is right
+there — until you notice that a narrative built from the author's description is a restatement of
+the claim rather than a check on it. Built from the code alone it is the one artifact that can
+*disagree* with the PR title, and Step 8 prints that disagreement as a `⚠` line. The run log records
+it as `narrative.title_mismatch`, which over many runs is the direct measure of whether the mode is
+telling anyone anything.
+
+**The vocabulary is resolved and labelled, never assumed.** `fr-ddd-vocab.sh` prefers the
+ddd-refiner's `.lattice/standards/ddd-principles.md`, extracting its glossary, bounded-context, and
+invariant sections into a brief; with no document it falls back to generic tactical terms and says
+so as `VOCAB: atom-defaults`. A narrative in the repo's real ubiquitous language and one in textbook
+DDD terms read almost identically and are worth very different amounts, so the reader is told which
+one they got — the same reason `HAS_GSTACK: 0` is stated rather than quietly absorbed. The
+orchestrator never loads the document itself; a full refiner output runs to a thousand lines.
+
+**Pass N is told, at length, not to write like a diff.** No paths, no line numbers, no code, no
+function names except where the name is itself a domain term. No "refactored", "updated", or
+"various changes". And when a change has no domain meaning — CI, lockfiles, formatting — it must say
+exactly that and leave the domain sections at `none`. Inventing a domain story for a build change is
+the failure that would make every future narrative untrustworthy, so it is called out as such in the
+prompt, in the failure modes, and in the examples.
+
+**`--pr 42` reviews someone else's PR**, by number or URL. `fr-pr-resolve.sh` fetches
+`pull/N/head` and builds a *detached worktree* at the PR head, because reviewers are told to open
+source files when the patch alone cannot settle a question — and with only a patch those reads would
+hit the user's checkout, a different commit, producing confident findings about a file nobody is
+proposing to merge. `SOURCE_ROOT` now points every pass, and Codex's working directory, at the right
+tree. A PR in a foreign repo is refused rather than half-reviewed: there is no tree here to build.
+
+Four things change once you are not the author, and they change the reasoning rather than the
+formatting: the verdict vocabulary becomes `APPROVE` / `APPROVE-WITH-COMMENTS` / `REQUEST-CHANGES`
+(`COMMIT` on someone else's PR addresses the wrong person about the wrong tree); triage bucket 2
+may no longer cite "a decision from this session", because there were none; bucket 4 requires that
+you actually opened the file; and the `/ship` handoff is skipped, since logging another branch's
+findings into your own gate would suppress them on a branch you never reviewed.
+
+**No mode posts anything to GitHub.** Not a comment, not a review, not a PR body — including in
+pr-remote mode where a PR is plainly sitting there. Publishing under the user's name is theirs to
+decide, and this skill is designed to run unattended inside `/loop`.
+
+### Two data-loss traps found and closed while making room for it
+
+**`fr-restore.sh` gated its index restore on `CHECKPOINT != "skipped"`.** That was exactly
+equivalent to `committed|failed` for as long as those were the only other states — and pr-remote
+adds a fourth. Under it nothing is ever staged, so the old test would have `read-tree`'d a
+pre-review index snapshot over the live one and silently discarded anything the user staged while
+the review was running. It prints `INDEX: restored`, which looks precisely like success. The gate is
+now on the two states by name, and `test-pr-mode.sh` asserts that a file staged mid-review is still
+staged afterwards — confirmed to fail against the old logic.
+
+**`fr-mutation-check.sh` would have called the user's own work a reviewer leak.** Its
+`committed|skipped` branch treats *any* dirt as a reviewer's, which is sound only because those two
+states leave a clean tree at fan-out. pr-remote leaves the user's uncommitted work untouched and
+present, so it takes the baseline-diff branch instead. It also now checks the PR worktree separately
+(`PR_WT_LEAK`) — dirt there needs no revert, since restore deletes the tree, but a reviewer that
+ignored "do not fix" may equally have ignored the forbidden-reads list.
+
+**`fr-preflight.sh` gained argument parsing**, and with it the rule that an unknown flag or mode
+exits non-zero instead of falling back to a default: a silently-defaulted `--pr` would review the
+local branch under someone else's PR number. Its two stop conditions are also skipped under `--pr`,
+both being statements about the local tree — a clean checkout on `main` is the *normal* state to
+review someone else's PR from, and `nothing_to_review` there would kill the run with a message that
+reads exactly like a correct answer.
+
+### Tests
+
+**`plugins/fresh-review/tests/test-pr-mode.sh` — 44 assertions.** `gh` is stubbed; the fetch is
+real, against a local origin carrying a real `refs/pull/42/head`, the same ref name GitHub serves.
+Covers ref parsing, `foreign_repo`, `gh_missing`, that `SOURCE_ROOT` holds the PR head's file
+contents while the user's checkout stays on the base commit, worktree placement and teardown,
+temp-ref deletion, restore idempotence, both mutation-check branches, and all three vocabulary
+resolutions.
+
+**`plugins/fresh-review/tests/test-review-mode.sh` — 20 assertions**, new coverage for the default
+path, which had none. Four of the scripts it runs were edited here, so it pins the round trip a
+review depends on: checkpoint → packet → mutation check → restore, ending with a staged file still
+staged and an unstaged modification still unstaged.
+
 ## 0.4.2 — 2026-08-02
 
 ### Repo tooling: CI, a release gate, and the first plugin test suite

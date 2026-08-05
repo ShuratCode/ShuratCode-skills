@@ -54,6 +54,10 @@ fi
   echo "DIFF_BASE=$DIFF_BASE"
   echo "CHECKPOINT=$CHECKPOINT_SHA"
   echo "RISK=$RISK"
+  # Where a reviewer must open source files from. Only ever differs from the
+  # user's checkout in pr-remote mode, and there getting it wrong means judging
+  # the PR against a different commit's file contents.
+  echo "SOURCE_ROOT=$SOURCE_ROOT"
 } > "$RUN_DIR/packet/scope.txt"
 
 {

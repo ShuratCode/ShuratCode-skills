@@ -17,6 +17,14 @@ description: |
   suggest before any /ship, /land-and-deploy, or manual git commit when the diff exceeds ~50 lines or
   touches auth, payments, migrations, or security-sensitive code.
 
+  Has a second mode — **pr review** — that adds a plain-English account of what the change does,
+  written in the repo's own domain vocabulary rather than in code. Use it when the user asks for a
+  "pr review", "review this PR", "explain this PR", "what does this PR do", "what does this change
+  do", "summarize this change/PR", "explain my changes in plain English", "describe this PR for a
+  non-engineer", "write the PR description", or names a PR by number or URL ("review PR 42",
+  "look at github.com/o/r/pull/42"). That mode reviews *and* narrates: it is the default run plus a
+  narrator pass, never a summary in place of a review.
+
   This is the right tool whenever the producer-Claude and the reviewer-Claude would otherwise be the
   same instance with the same context — the entire point is to break that bias. Do NOT call
   /lattice:review or /cso directly when the user wants fresh eyes; those run inside the producer
@@ -32,11 +40,46 @@ allowed-tools:
 
 # fresh-review
 
-Pre-commit code review with enforced producer/reviewer context separation.
+Code review with enforced producer/reviewer context separation — pre-commit by default, or as a PR review that also explains the change in plain English.
 
 ## Why this skill exists
 
 When you design, write, and review code in the same session, the reviewer-Claude already agrees with the design choices and knows the rationale. It rationalizes away its own decisions. Real review needs the reviewer to *lack* context the producer has. This skill enforces that separation by spawning subagents with strict context restrictions, adding a genuinely out-of-process cross-model reviewer, and then triaging their findings back in the producer context (where intent is known and "by design" can be properly justified).
+
+The same separation turns out to be worth even more for *describing* a change than for finding fault in it. A summary written by someone who knows what the change was meant to do is a restatement of that intention; a summary built from the code alone is the only kind that can contradict it. That is what `pr` mode is for.
+
+## Modes
+
+Two output shapes, one machine. Every mode fans out the same three critic passes against the same packet; a mode changes what *else* is produced and who the reader is.
+
+| The user's words | Preflight flags | Subject of the review | Chat output |
+|---|---|---|---|
+| "fresh review", "review before I commit", "what did I miss" | *(none)* | your branch | verdict + findings |
+| "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **narrative** + verdict + findings |
+| "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **narrative** + verdict + findings |
+
+Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do not re-derive it later.
+
+- A **number or pull URL** anywhere in the request means `--pr <that>` — which implies `--mode pr`.
+- Any plain-English *"what does this do"* framing means `--mode pr` with no PR ref: same branch, same passes, plus the narrative.
+- Everything else is the default. When in doubt, default. The narrative is additive, so guessing `review` costs the user a paragraph; guessing `pr` on a plain pre-commit check costs a subagent.
+
+**`pr` mode adds Pass N — the narrator.** Its product is a plain-English account of what the change does, at the altitude of someone who owns the product and does not read code, in the vocabulary the repo's own DDD principles establish. It runs *alongside* the critics, never instead of them: a summary that has not been reviewed is how a change gets waved through on the strength of a good description.
+
+### pr-local and pr-remote
+
+`--pr <ref>` moves the subject of the review off your branch, and four things follow from no longer being the author:
+
+| | `review` / `pr` on your branch | `pr` with a ref (**pr-remote**) |
+|---|---|---|
+| What is reviewed | merge-base..worktree | the PR head, fetched fresh |
+| Source files opened from | your checkout | a detached worktree at the PR head (`SOURCE_ROOT`) |
+| WIP checkpoint (Step 3) | runs | **skipped** — nothing of yours is being reviewed |
+| Verdict vocabulary | `COMMIT` / `COMMIT-WITH-FIXES` / `DO-NOT-COMMIT` | `APPROVE` / `APPROVE-WITH-COMMENTS` / `REQUEST-CHANGES` |
+| Triage bucket 2 ("by design") | may cite this session's decisions | **may not** — you have no intent knowledge |
+| Handoff to `/ship` (Step 8.6) | runs | **skipped** — you are not shipping this |
+
+The verdict vocabulary is not cosmetic. `COMMIT` on someone else's PR reads as an instruction to the wrong person about the wrong tree, and this skill's output is designed to be read verdict-first.
 
 ## Configuration
 
@@ -45,9 +88,10 @@ LATTICE_REVIEW_CMD="/lattice:review"     # Lattice standards conformance (plugin
 CSO_CMD="/cso --diff"                    # gstack security audit, scoped to branch changes
 CODEX_JOIN_BUDGET=240                    # seconds to wait for Codex after the Claude passes return
 FR_RUN_RETENTION=20                      # run directories kept before pruning (env var, read by fr-log.sh)
+DDD_DOC=".lattice/standards/ddd-principles.md"   # narrative vocabulary; resolved by fr-ddd-vocab.sh
 ```
 
-- Review scope is resolved mechanically by `fr-preflight.sh`: `branch` (merge-base..worktree) whenever an `origin/<base>` exists to merge-base against, `working` otherwise. `branch` matches what a human PR reviewer sees, and a Lattice `checkpoint_mode: continuous` session already has WIP commits on the branch that `working` scope would silently skip.
+- Review scope is resolved mechanically by `fr-preflight.sh`: `branch` (merge-base..worktree) whenever an `origin/<base>` exists to merge-base against, `working` otherwise — or `pr` (merge-base..PR head), set by `fr-pr-resolve.sh` when a PR ref was given. `branch` matches what a human PR reviewer sees, and a Lattice `checkpoint_mode: continuous` session already has WIP commits on the branch that `working` scope would silently skip.
 - `/cso --diff` scopes the audit to changed files and keeps daily mode's 8/10 confidence gate. High-risk diffs upgrade to `--diff --comprehensive` (Step 4).
 - **Codex runs here as a full pass**, in the background, concurrent with the others. Rationale in Pass C.
 
@@ -65,7 +109,8 @@ The division of labor is therefore fixed, not configurable:
 | Security | Pass B (`/cso`, confidence-gated) | `security` specialist (ungated) |
 | Cross-model review | Pass C (`codex review`) | Codex structured + adversarial |
 | performance, data-migration, api-contract, Red Team | **not covered** | owned here |
-| Reviews which artifact | the pre-commit checkpoint | the final diff, post-fix, post-base-merge |
+| Plain-English account of the change | `pr` mode, Pass N | — |
+| Reviews which artifact | the pre-commit checkpoint, or a PR head | the final diff, post-fix, post-base-merge |
 
 The four structural specialists and Red Team are genuinely absent from this skill. That is the trade: they run once, at ship time, against the diff that actually lands. If you want them *before* commit, the answer is `/review` directly, not this skill.
 
@@ -75,14 +120,15 @@ The reverse redundancy — ship re-running what *this* skill already did — is 
 
 Two audiences, two artifacts. Do not confuse them.
 
-- **Chat is for the human.** It gets the verdict on the first line and *every* finding from *every* pass, merged and triaged. It is never a pointer to a file. "Full report at `<path>`" is not an acceptable substitute for the findings themselves.
+- **Chat is for the human.** It gets the verdict on the first line and *every* finding from *every* pass, merged and triaged — plus, in `pr` mode, the narrative in full above it. It is never a pointer to a file. "Full report at `<path>`" is not an acceptable substitute for the findings themselves, and it is not one for the narrative either: in `pr` mode the narrative *is* what the user asked for.
 - **Disk is for the agents and for later analysis.** Raw pass reports, the diff packet, and the run log live in the run directory. Nothing there is required reading for the user.
+- **Nothing is for GitHub.** No mode posts, comments, or edits a PR. See "What this skill does NOT do".
 
 ## Token discipline
 
 Four invariants. Every step below is built around them; violating one silently makes the run cost several times what it should.
 
-1. **The orchestrator never loads the diff.** `fr-packet.sh` classifies risk with `grep -c` over the patch and prints only counts. The full patch enters no context but the subagents' own.
+1. **The orchestrator never loads the diff** — nor the DDD principles document. `fr-packet.sh` classifies risk with `grep -c` over the patch and prints only counts; `fr-ddd-vocab.sh` extracts the vocabulary sections into a brief and prints only its line count. A full refiner output runs to a thousand lines, and the orchestrator's job is to hand it to Pass N by path, not to read it.
 2. **Reviewers read the packet, not git.** The diff is materialized once (Step 4) and every pass is handed the same file paths. No pass re-derives scope, and no pass runs `git diff` — which also guarantees their findings are comparable.
 3. **Passes return compact findings; prose goes to disk.** This is the largest saving by far. `/cso` alone emits thirteen numbered phases of narrative; the compact block is a few hundred tokens. Each pass writes its full report to `$RUN_DIR/raw/` and returns only the fixed-format block in Step 5.
 4. **Raw reports are not read back.** Triage runs on the compact blocks. Open a raw report only to disambiguate one specific finding, and read only that finding's section.
@@ -91,17 +137,19 @@ The same principle governs the shell work: every mechanical step is a script in 
 
 ## Workflow
 
-Steps run in order. Step 5 is one parallel fan-out; everything else is sequential.
+Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Four steps are mode-conditional and say so in their own heading: **1.5** and **4.5** only run in the modes that need them, and **3** and **8.6** are skipped in pr-remote. Nothing else branches on mode.
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
 ### Step 1: Preflight
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh"            # review mode
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --mode pr   # pr mode, your branch
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42     # pr-remote (implies --mode pr)
 ```
 
-This probes the repo, resolves the review scope, creates the run directory, and writes `state.env`. Export `RUN_DIR` from its output — every later script takes it as `$1`.
+This probes the repo, resolves the review scope, creates the run directory, and writes `state.env`. Export `RUN_DIR` from its output — every later script takes it as `$1`. Pass the flags from the Modes table verbatim; the script rejects an unknown flag or mode with a non-zero exit rather than falling back to a default, because a silently-defaulted `--pr` would review the local branch under someone else's PR number.
 
 On `STATUS: stop`, tell the user and stop. `STOP_REASON` is one of:
 
@@ -109,12 +157,15 @@ On `STATUS: stop`, tell the user and stop. `STOP_REASON` is one of:
 - `nothing_to_review` — no dirt and no commits the base branch lacks.
 - `unmerged_index` — a conflict is in progress. Do **not** checkpoint a conflicted tree; a half-merged tree is not a reviewable diff. Resolve it, then re-run.
 
+**Neither of the last two can fire under `--pr`,** and that is deliberate: both describe the *local* tree, which is not the subject of a pr-remote review. A clean checkout on `main` is the normal state to review someone else's PR from, and `nothing_to_review` there would stop the run with a message that reads exactly like a correct answer. A conflicted index is likewise harmless in that mode — it is never staged, committed, or restored.
+
 `AHEAD` counts commits **not in the base branch** (`$DIFF_BASE..HEAD`) — deliberately not `@{upstream}..HEAD`. Comparing a branch against its own upstream asks the wrong question: a fully pushed PR branch reports `AHEAD=0` even though its PR diff is a hundred commits wide, and a branch with no upstream falls back to `0`. Either would stop the skill with "nothing to review" while a complete, reviewable diff sits in front of it. The `@{upstream}` form survives only as the degraded fallback for when there is no `origin/$BASE` to merge-base against.
 
 Tool-availability accounting — state each of these up front, never silently:
 
-- `HAS_GSTACK: 0` → `/cso` does not exist here. **One of three passes cannot run.** Say so plainly, run Pass A and Pass C, label the verdict reduced-lens. Discovering this inside a subagent instead wastes the run and produces a report that looks complete but isn't. Note also that no gstack install means no `/ship` either, so the structural specialists this skill defers to will never run at all.
+- `HAS_GSTACK: 0` → `/cso` does not exist here. **One of the three critic passes cannot run.** Say so plainly, run Pass A and Pass C, label the verdict reduced-lens. Discovering this inside a subagent instead wastes the run and produces a report that looks complete but isn't. Note also that no gstack install means no `/ship` either, so the structural specialists this skill defers to will never run at all.
 - `HAS_CODEX: 0` → no cross-model coverage. Say so; do not substitute a Claude pass for it.
+- `HAS_GH: 0` → pr-remote is impossible. Only matters when a PR ref was given; Step 1.5 stops on it.
 - `CODEX_CFG: unknown` → `gstack-config` was not found, so the setting could not be read. Report unknown, never guess `enabled`. This setting gates *gstack's* internal Codex, not ours; Pass C runs on `HAS_CODEX` alone.
 
 Two other outputs matter later:
@@ -126,11 +177,46 @@ The run directory persists, unlike a `mktemp` scratch dir — it is the record t
 
 `LOG_DIR` is deliberately the **common** git dir, not the per-worktree one. In a worktree `git rev-parse --git-dir` resolves to `.git/worktrees/<name>`, so an index written there would fragment across worktrees and be deleted with them — and cross-run analysis would silently see only a fraction of the history. Run directories stay local and disposable; the index in `LOG_DIR` is the durable record. Entries may therefore outlive the run directory they point at, which is expected.
 
+### Step 1.5: Resolve the PR (pr-remote only)
+
+Skip entirely unless `PR_REF` is set.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-pr-resolve.sh" "$RUN_DIR"
+```
+
+Turns the ref into a reviewable local diff plus a tree reviewers can open files from, and overwrites `REVIEW_SCOPE`, `DIFF_BASE`, `DIFF_CMD`, and `SOURCE_ROOT` in `state.env`. It also sets `CHECKPOINT=pr_remote`, which is what makes Steps 3, 6.5, 8.6, and 9 take their pr-remote branches without being told twice.
+
+**Why a detached worktree and not just `gh pr diff`.** Reviewers are told to open a source file when the patch alone cannot settle whether something is a defect — `/cso` in particular is nearly blind without the surrounding code. With only a patch, those reads would hit your checkout, which is a *different commit*, and the reviewer would confidently judge the PR against the wrong file contents. So the PR head is materialized once and `SOURCE_ROOT` points every pass at it. The cost is one checkout; the alternative is findings that describe a file nobody is proposing to merge.
+
+`git worktree` places it under `.fresh-review/` when that path is gitignored and in `$TMPDIR` otherwise — never under the git dir, and never anywhere git would report it as untracked dirt inside the diff under review.
+
+On `PR: unresolved`, **stop and say why.** There is no safe default: falling back to the local branch would review the wrong change under the PR's number. `REASON` is one of:
+
+- `gh_missing` — install/authenticate `gh`, or drop the ref and run `--mode pr` on a local branch instead.
+- `bad_pr_ref` — the ref was neither a bare number nor a `github.com/…/pull/N` URL.
+- `foreign_repo` — the URL is a PR in a different repo than this checkout's `origin`. There is no tree here to build a worktree from. Clone that repo and run there.
+- `gh_pr_view_failed` / `gh_pr_view_incomplete` — read `raw/pr-view.err`; usually auth or a wrong number.
+- `pr_fetch_failed` — `origin` does not serve `pull/N/head`. Non-GitHub remotes do not.
+- `no_merge_base` — the PR's base branch and head share no history.
+- `worktree_failed` — read `raw/pr-worktree.err`.
+
+Two resolved outputs to state out loud:
+
+- `HEAD_DRIFT: yes` — the PR was pushed to between the `gh` call and the fetch. Not an error, but the report must name the commit actually reviewed, which is `PR_HEAD`, not what `gh` reported.
+- `PR_STATE` — `MERGED` and `CLOSED` are reviewable (narrating a merged PR is a legitimate use). Just say which, so nobody acts on a `REQUEST-CHANGES` for a PR that landed last week.
+
+**The PR title is fetched and deliberately withheld from every pass.** It is in `$RUN_DIR/pr.json`, and it goes in the Step 8 header for the human to read — but never into the packet or a subagent prompt. The title is the author's claim about the change; Pass N's entire value is deriving the change from the code independently, and a divergence between the two is a finding rather than an input. The body is never fetched at all.
+
 ### Step 2: State the scope
 
 `fr-preflight.sh` already printed `REVIEW_SCOPE` and `DIFF_CMD`. Say them out loud — one canonical scope string, handed identically to every reviewer so their findings are comparable. Nothing is materialized yet; the packet is built in Step 4, after the checkpoint, so that untracked files are in it.
 
+State `SOURCE_ROOT` too whenever it is not the repo root. It is the one piece of scope a reviewer can get wrong silently: reading the right path in the wrong tree returns plausible file contents from the wrong commit.
+
 ### Step 3: WIP checkpoint
+
+**Skip this step entirely in pr-remote mode** — `CHECKPOINT` is already `pr_remote`, the diff comes from two committed refs, and there is nothing of yours under review. Committing the user's unrelated work-in-progress in order to review someone else's PR would be a mutation with no purpose.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-checkpoint.sh" "$RUN_DIR"
@@ -164,9 +250,30 @@ Codex depth is deliberately *not* gated on risk — Pass C runs the structured r
 
 State the file count and risk class out loud. If `LINES` exceeds ~2000, warn that reviewer quality degrades at that size and that a re-run scoped to a subdirectory reads more carefully — then **proceed anyway**. This skill never blocks on a question: it is meant to run unattended, including inside `/loop`. Every branch point resolves to a default and says which default it took.
 
+### Step 4.5: Resolve the domain vocabulary (pr mode only)
+
+Skip unless `MODE` is `pr`.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-ddd-vocab.sh" "$RUN_DIR"
+```
+
+Decides which vocabulary Pass N speaks in and materializes it as `packet/ddd.md`. Resolution order is the ddd-refiner's output first, tactical defaults second:
+
+| `VOCAB` | Source | What Pass N can claim |
+|---|---|---|
+| `ddd-principles` | `.lattice/standards/ddd-principles.md` under `SOURCE_ROOT` | the repo's real ubiquitous language |
+| `atom-defaults` | no document — generic tactical terms + nouns inferred from the diff | structural terms only |
+
+`GLOSSARY` refines the first row: `extracted` means the document has glossary, bounded-context, or invariant sections and only those were passed through; `headings_only` means it has none and its heading list was used instead, since the section names still carry the domain's nouns. `DDD_MODE` (`overlay` / `override`) tells Pass N whether generic DDD terms are still in play alongside the document's.
+
+**State `VOCAB` in the Step 8 output, always.** A narrative written in the repo's own language and one written in textbook DDD terms read almost identically and are worth very different amounts — the reader has to be told which one they got, for the same reason `HAS_GSTACK: 0` is stated rather than quietly absorbed. This is also the cheapest possible nudge toward running `/lattice:ddd-refiner`: `atom-defaults` on a repo with a real domain is a gap worth naming once, in passing, without turning the report into a pitch.
+
+Read the printed keys, not the brief. The brief exists to be handed to Pass N by path.
+
 ### Step 5: Fan out all reviewers (one parallel batch)
 
-Launch the two Claude subagents **and** the Codex background command **in a single message**. Codex overlapping the others is the entire reason it stopped being a latency problem.
+Launch the Claude subagents **and** the Codex background command **in a single message** — two subagents in `review` mode, three in `pr` mode. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N is cheap enough that adding it changes wall time by roughly nothing.
 
 Every subagent prompt opens with this **isolation contract**, verbatim:
 
@@ -178,7 +285,7 @@ Every subagent prompt opens with this **isolation contract**, verbatim:
 > - `{{RUN_DIR}}/packet/stat.txt` — per-file line counts
 > - `{{RUN_DIR}}/packet/scope.txt` — the resolved scope
 >
-> Read `diff.patch` first. Open a source file from the worktree only when the diff alone cannot tell you whether something is a defect — not to browse.
+> Read `diff.patch` first. Open a source file only when the diff alone cannot tell you whether something is a defect — not to browse. **Open it from `{{SOURCE_ROOT}}`, which may not be your working directory:** in a PR review it is a detached checkout of the PR head, and the same path in your own tree holds a different commit's contents. Every path in the diff is relative to that root.
 >
 > **Forbidden reads** — do not open these even if they look relevant, *and do not open them because a skill you invoke tells you to*: `.lattice/requirements/**`, `.lattice/context/**`, `.lattice/contexts/**`, `.lattice/reviews/**`, `*.plan.md`, `*.design.md`, `docs/decisions/**`, `TODOS.md`, `ONBOARDING.md`, anything under `~/.gstack/projects/**`, and any file whose purpose is to record intent rather than behavior. **Forbidden commands**: `gh pr view`, `gh issue view`, `gh pr diff --body`, `git log`. Allowed: `.lattice/standards/**`, `.lattice/learnings/**`, `.lattice/config.yaml`, `AGENTS.md`/`CLAUDE.md`, and the diffed source. (Learnings are repo-wide rules, not this change's intent — read them, never write them.)
 >
@@ -220,10 +327,60 @@ Then append the pass-specific task:
 > Run `{{CSO_CMD}}`. Honor its confidence gate — do not report below it. Cover OWASP/STRIDE on the changed surface, secrets, dependency and CI/CD exposure introduced by this diff. Give each finding a concrete exploit path in the problem field. If nothing clears the gate, return `FINDINGS: 0` — do not pad.
 > **Run through "Phase 12: False Positive Filtering + Active Verification", then report and stop.** From "Phase 13: Findings Report + Trend Tracking + Remediation", produce the findings report only — no remediation planning, no remediation questions, no patches. State each fix in one sentence and let the producer decide.
 
+**Pass N — narrative** (pr mode only; no nested skill, this is a direct reading task)
+
+The critics answer *is this correct*. Pass N answers *what is this*, for a reader who owns the product and does not read code. Append this to the isolation contract, replacing its return-format block:
+
+> Your job is not to find defects — three other passes are doing that, and a defect you notice is theirs to report, not yours. Your job is to say what this change **does**, in plain English, in this repo's own domain language.
+>
+> Read `{{RUN_DIR}}/packet/ddd.md` first — it is this repo's domain vocabulary, and `VOCAB` there tells you whether it is the project's real ubiquitous language or generic tactical terms. Then read `diff.patch`. Open a source file from `{{SOURCE_ROOT}}` only to learn what a thing *is* when the diff does not make that clear.
+>
+> **How you must write.** These are not style preferences; a narrative that breaks them is worse than no narrative, because it reads authoritative while saying nothing:
+>
+> - **No code, no file paths, no line numbers, no diff excerpts, no function or variable names.** One exception: a name that is *itself* a term in the domain vocabulary. `Order` may appear. `OrderServiceImpl`, `handleSubmit`, and `src/api/orders.ts` may not.
+> - **No empty verbs.** "Refactored", "updated", "improved", "enhanced", "cleaned up", "various changes", "better error handling" all say nothing. Say what is now true that was not true before.
+> - Present tense, active voice, one idea per line. At most six bullets in any section — if a section needs more, you are describing code rather than the domain, so raise the altitude.
+> - **Never state what the author intended.** You have not been shown it and you are not permitted to look. Describe what the code now does. "This aims to…" and "the goal is…" are both out of bounds; "a customer can now…" is what you are for.
+> - **If the change has no domain meaning, say exactly that.** Tooling, CI, build config, formatting, dependency bumps, and test-only changes are real work with no domain story. Put that in HEADLINE and leave the domain sections at `none`. Inventing a domain narrative for a build change is the single worst outcome available to you — it is the failure that makes every future narrative untrustworthy.
+>
+> Write your full narrative to `{{RUN_DIR}}/raw/narrative.md`. Return *only* this block:
+>
+> ```
+> PASS: narrative
+> STATUS: ok | partial | failed
+> VOCAB_USED: <terms from the brief you actually used, comma-separated; empty if none applied>
+> ---
+> HEADLINE: <one or two sentences — what this change makes true or possible>
+> ---
+> WHAT CHANGED
+> - <domain thing>: <what is now different about it>
+> ---
+> NEW OR CHANGED RULES
+> - <a condition the system now guarantees, or has stopped guaranteeing — or "none">
+> ---
+> LIFECYCLE AND FLOW
+> - <a new or removed step, state, or event in a flow — or "none">
+> ---
+> BOUNDARIES AND CONTRACTS
+> - <what other parts of the system, or other teams, now see differently — or "none">
+> ---
+> NOT IN THIS CHANGE
+> - <something a reader of your HEADLINE would reasonably assume changed, but did not>
+> ---
+> NOTES: <at most two lines, only if something anomalous happened>
+> FILES_READ: <comma-separated paths you opened>
+> ```
+
+Three things about this pass are deliberate:
+
+- **It is isolated exactly as hard as the critics are.** Commit messages, PR titles, plans, and design docs are all forbidden to it. That looks perverse for a summarizer — the intent is right there — until you notice that a narrative built from the author's description is a restatement of the claim, not a check on it. Built from the code alone, it is the one artifact that can *disagree* with the PR title, and that disagreement is the most valuable thing this mode produces.
+- **`NOT IN THIS CHANGE` is not filler.** It is what makes the rest trustworthy: a summary that only says what happened invites the reader to assume the adjacent thing happened too. This is where a reviewer catches "wait, I thought this also covered refunds."
+- **It reports no findings and gets no bucket.** Pass N never enters triage and never converges with anything. If it noticed a defect, it was told to leave it alone; if the critics missed it, the log will show it, and that is a signal about the critics rather than a reason to give the narrator a second job.
+
 **Pass C — Codex** (background Bash, launched in the same message, not a subagent)
 
 ```bash
-( codex review --base "$BASE" \
+( cd "$SOURCE_ROOT" && codex review --base "$BASE" \
     -c sandbox_mode="read-only" -c approval_policy="never" \
     -c 'model_reasoning_effort="high"' \
     < /dev/null > "$RUN_DIR/raw/codex.md" 2> "$RUN_DIR/raw/codex.err"
@@ -235,7 +392,8 @@ Use `run_in_background: true`. Never set a Bash `timeout` on this — a timeout 
 Four things about this invocation are deliberate:
 
 - **`codex review`, not `codex exec`.** `review` scopes natively and emits structured, severity-marked findings that drop into the triage table. `exec` returns prose that would have to be parsed. gstack uses `exec` for its adversarial pass and gates `review` at 200+ lines as its own cost control; that gating does not bind us once Codex is off the critical path.
-- **`--base`, and therefore no custom prompt.** The CLI rejects `[PROMPT]` together with `--base` (`error: the argument '[PROMPT]' cannot be used with '--base <BRANCH>'`), so the isolation contract cannot be injected. `--base` still wins: a separate process running a different model family with no conversation history is the strongest isolation of any pass here, and handing it the base branch avoids spending agentic turns rediscovering the diff. For `REVIEW_SCOPE="working"`, use `--commit "$CHECKPOINT_SHA"` instead.
+- **`--base`, and therefore no custom prompt.** The CLI rejects `[PROMPT]` together with `--base` (`error: the argument '[PROMPT]' cannot be used with '--base <BRANCH>'`), so the isolation contract cannot be injected. `--base` still wins: a separate process running a different model family with no conversation history is the strongest isolation of any pass here, and handing it the base branch avoids spending agentic turns rediscovering the diff. For `REVIEW_SCOPE="working"`, use `--commit "$CHECKPOINT_SHA"` instead. For `REVIEW_SCOPE="pr"`, the `cd "$SOURCE_ROOT"` above is load-bearing and the base must be `--base "$DIFF_BASE"` — a branch *name* there resolves against local refs and would silently diff the PR head against your `main`.
+- **`cd "$SOURCE_ROOT"`.** In review mode this is the repo root and the `cd` is a no-op. In pr-remote it is the only thing pointing Codex at the PR's commit instead of your checkout.
 - **`approval_policy="never"` and `sandbox_mode="read-only"`.** A non-interactive background run that stalls on an approval prompt is indistinguishable from a slow one. Read-only also enforces "do not fix anything" at the process level rather than by instruction.
 - **No `--enable web_search_cached`.** gstack enables it; for a diff review it rarely pays and it adds latency.
 
@@ -261,7 +419,9 @@ Then audit isolation. Check each `FILES_READ:` line against the forbidden list.
 
 Self-reporting is the only audit available for *reads* — a parent agent cannot inspect a subagent's tool trace, and it cannot see a `gh pr view` call at all. Treat this as a smoke detector, not a guarantee. (Step 6.5 is the one part of the contract that *is* mechanically verified; reads are not.)
 
-Neither remaining Claude pass natively hunts for intent — that was `/review`'s habit, and `/review` no longer runs here. So a forbidden read from Pass A, Pass B, or the compactor is genuinely anomalous rather than expected, and deserves more weight than a routine leak: investigate it instead of noting it and moving on.
+No remaining Claude pass natively hunts for intent — that was `/review`'s habit, and `/review` no longer runs here. So a forbidden read from Pass A, Pass B, or the compactor is genuinely anomalous rather than expected, and deserves more weight than a routine leak: investigate it instead of noting it and moving on.
+
+**A forbidden read by Pass N is worse than any other pass's,** and is the one leak that should make you discard output rather than downgrade it. A critic that peeked at a design doc produces findings that are still findings. A narrator that peeked at a plan, a commit message, or a PR title produces a narrative that has quietly become a *restatement of the author's claim* — indistinguishable in form from an independent reading, and it destroys the only property that made the narrative worth printing. On a Pass N leak: label the narrative `[intent-contaminated]` in the Step 8 output, or re-spawn it. Never print it clean.
 
 ### Step 6.5: Reviewer mutation check (read-only enforcement)
 
@@ -281,6 +441,9 @@ The script picks its own baseline from `CHECKPOINT`, and that distinction is the
 
 - `committed` and `skipped` both leave a clean tree at fan-out, so *any* dirt now came from a reviewer — the strongest form of this check. Revert is safe: tracked files go back to `HEAD`, which holds the pre-review content either way.
 - `failed` has the producer's own uncommitted work interleaved with the reviewer's, and `git restore` cannot tell them apart. The script **refuses `--revert`** there and reports `REVERT: refused_checkpoint_failed`. Print the delta, name the suspect paths, hand it to the user.
+- `pr_remote` is the `failed` case's shape for a different reason: nothing was ever staged, so the user's untouched work-in-progress is still sitting in the tree. A raw status here would report all of it as a reviewer leak on every single run, so the check is a baseline diff, and `--revert` is refused (`REVERT: refused_pr_remote`) for the same reason it is under `failed`.
+
+In pr-remote mode there is a **second** tree a reviewer could have written into, and it is the one they were pointed at, so `PR_WT_LEAK` reports it separately. Dirt there counts as a leak even though it needs no revert — Step 9 deletes the worktree regardless. What matters is the inference, not the cleanup: a reviewer that ignored "do not fix" may equally have ignored the forbidden-reads list.
 
 **Untracked files are only listed, never cleaned.** `git clean` here could delete real work — a build artifact, a watcher's output, or a file the user created a second ago. Report `UNTRACKED_REMAINING` and let them decide.
 
@@ -288,7 +451,7 @@ Record any violation, and treat that pass's findings as still valid but its judg
 
 ### Step 7: Triage
 
-You are back in the producer context with full knowledge of design intent. Work from the compact blocks. Deduplicate across passes (same `file:line` + same root cause = one finding, sources merged), then assign each to exactly one bucket:
+You are back in the producer context with full knowledge of design intent. Work from the compact blocks — Pass N's is not among them; it carries no findings and never enters triage. Deduplicate across passes (same `file:line` + same root cause = one finding, sources merged), then assign each to exactly one bucket:
 
 1. **REAL BUG** — must fix before commit. State the fix in one sentence.
 2. **REAL BUT BY DESIGN** — cite the specific decision from this session, or the specific standard/doc, that makes it intentional. No citation → reclassify as REAL BUG. Non-negotiable: this is what stops the producer from rationalizing.
@@ -305,7 +468,14 @@ Two overrides:
   | `codex` + `lattice`, or `codex` + `cso` | different model family, separate process, no shared context | **strongest** — treat as near-confirmed; bucket 2 needs an explicit citation |
   | `cso` + `lattice` | same model, but different checklists and a confidence gate on one side | moderate |
 
-  With three passes, convergence is *rarer* than it would be with a nested specialist army — but not *weaker*. The rows above keep exactly the weight they state, and a finding raised by one pass alone is still a finding raised by one pass alone. Do not loosen bucket 2's citation requirement, or relax the security floor, to compensate for thinner agreement: the correct response to fewer lenses is a more conservative verdict, not a lower bar.
+  With three critic passes, convergence is *rarer* than it would be with a nested specialist army — but not *weaker*. The rows above keep exactly the weight they state, and a finding raised by one pass alone is still a finding raised by one pass alone. Do not loosen bucket 2's citation requirement, or relax the security floor, to compensate for thinner agreement: the correct response to fewer lenses is a more conservative verdict, not a lower bar.
+
+**In pr-remote mode there is no producer context, and the buckets change accordingly.** This is the one step where the mode genuinely alters your reasoning rather than your output format:
+
+- **Bucket 2 may not cite a session decision** — there were none; the author is someone else. It admits only a standard, a config, or a code path you can point at in `SOURCE_ROOT`. "The author presumably meant to…" is bucket 1. This is stricter than the normal rule, not looser: the usual escape hatch was legitimate only because the producer actually held the intent.
+- **Bucket 4 requires that you opened the file.** Claiming a reviewer misread code you have not read yourself, in a change you did not write, is a guess. Without the read, it stays in bucket 1.
+- **The verdict vocabulary is `APPROVE` / `APPROVE-WITH-COMMENTS` / `REQUEST-CHANGES`.** Bucket 1 non-empty means `REQUEST-CHANGES`.
+- Findings are **comments, not fixes.** Phrase the `→ fix:` line as what you would ask for, and never edit the PR's code.
 
 Write the merged pre-triage findings to `$RUN_DIR/findings.tsv` for the log.
 
@@ -313,10 +483,45 @@ Write the merged pre-triage findings to `$RUN_DIR/findings.tsv` for the log.
 
 **This is the primary output.** Print it in full, in chat, in this shape. Verdict first, always.
 
+In `pr` mode, one block comes before the verdict — the narrative, printed exactly as Pass N returned it, section headings and all. It goes first because in `pr` mode it is what the user asked for, and because a reader who does not yet know what the change *does* cannot evaluate a list of findings about it. It is the only thing that ever precedes the verdict line.
+
+```
+WHAT THIS CHANGE DOES — <branch, or PR #<n>: <title>>
+vocabulary: <ddd-principles | atom-defaults> · <url, in pr-remote mode>
+
+<HEADLINE, as prose>
+
+WHAT CHANGED
+  • ...
+
+NEW OR CHANGED RULES
+  • ...
+
+LIFECYCLE AND FLOW
+  • ...
+
+BOUNDARIES AND CONTRACTS
+  • ...
+
+NOT IN THIS CHANGE
+  • ...
+```
+
+Rules for the narrative block:
+
+- **Print it verbatim.** Do not rewrite it in your own words, do not "improve" it, and above all do not merge it with what you know about the change. You have the producer context; Pass N does not, and that is the point. Editing it with your own knowledge silently converts an independent reading back into the author's claim.
+- **Collapse empty sections to one line** (`NEW OR CHANGED RULES — none`) rather than dropping them. `none` is information: it says the change has no rule impact, which is different from nobody having looked.
+- **When the narrative and the PR title disagree, say so, right here, in one line.** `⚠ the PR title says <x>; the code says <y>.` This is the highest-value line this mode can emit and it is easy to leave out politely. Do not editorialize on it — state both and let the reader decide.
+- On `VOCAB: atom-defaults`, add one line: `no .lattice/standards/ddd-principles.md in this repo — the narrative uses generic DDD terms; /lattice:ddd-refiner would give it the project's own.` One line, once, no pitch.
+- On a Pass N isolation leak (Step 6), prefix the block `[intent-contaminated]` or omit it entirely.
+
+Then the review block, unchanged in shape:
+
 ```
 FRESH REVIEW — <COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT>
-<branch> · <N> files, +<a>/−<b> · risk: <normal|HIGH> · <elapsed>
-passes: lattice <✓n|✗>  cso <✓n|✗>  codex <✓n|⧗ running|✗ reason>
+                 (pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES)
+<branch, or PR #<n> @ <short sha>> · <N> files, +<a>/−<b> · risk: <normal|HIGH> · <elapsed>
+passes: lattice <✓n|✗>  cso <✓n|✗>  codex <✓n|⧗ running|✗ reason>  narrative <✓|✗>
 not covered here — /ship Step 9 owns: performance, data-migration, api-contract, red-team.
 
 BLOCKERS — fix before commit (<n>)
@@ -338,7 +543,9 @@ log: <RUN_DIR>
 
 Rules:
 
-- The verdict is the first line. Never bury it under a preamble.
+- The verdict is the first line of the review block, and the narrative block is the only thing permitted above it. Never bury it under a preamble.
+- In pr-remote mode the header names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open, so nobody acts on `REQUEST-CHANGES` for something that already landed.
+- `narrative ✗` in the pass line means Pass N failed or was not run. In `review` mode omit the field entirely rather than printing `narrative —`.
 - The `not covered here` line names what this skill structurally does not look at, so a `COMMIT` verdict is never mistaken for full coverage. It is not optional. If `HAS_GSTACK: 0`, replace the trailing period with ` — but no gstack install was found, so nothing will run these.`
 - **Every finding from every pass appears here**, in one of the four buckets. Deduplicated, with its sources tagged, but never dropped and never deferred to the report file. A bucket with zero findings collapses to a single `BY DESIGN (0)` line.
 - Blockers get the full two-line treatment. The other three buckets get one line each.
@@ -362,6 +569,8 @@ Then update `$RUN_DIR/report.md` and set `codex.changed_verdict` in the run log.
 
 ### Step 8.6: Hand the run to `/ship`
 
+**Skip this step entirely in pr-remote mode.** The handoff arms a gate on *your* next `/ship` of *your* branch; logging someone else's PR into it would suppress findings on a branch you never reviewed. Say `SHIP_GATE: n/a — reviewed PR #<n>, not this branch` and move on.
+
 **Run before Step 9** — it needs the checkpoint SHA, which the reset destroys.
 
 ```bash
@@ -370,7 +579,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-handoff.sh" \
 ```
 
 - `STATUS` is `clean` only when bucket 1 is empty; otherwise `issues_found`.
-- The fourth argument is the comma list of passes that returned `STATUS: ok` — drop any that failed or were unavailable. This is load-bearing, not bookkeeping: the ship-side gate only cuts ship's `testing`/`maintainability` specialists if `lattice` is in that list, and only cuts ship's Codex passes if `codex` is. A pass you list but did not actually run silently removes a lens from the final gate.
+- The fourth argument is the comma list of **critic** passes that returned `STATUS: ok` — drop any that failed or were unavailable, and never include `narrative`. This is load-bearing, not bookkeeping: the ship-side gate only cuts ship's `testing`/`maintainability` specialists if `lattice` is in that list, and only cuts ship's Codex passes if `codex` is. A pass you list but did not actually run silently removes a lens from the final gate — and `narrative` reports no findings at all, so listing it would claim coverage that nothing produced.
 - `findings.json` is a JSON array you write first. Rules for it:
   - **Only buckets 2, 3, and 4**, each as `action: "skipped"`. Those are the decisions worth carrying forward.
   - **Never log a bucket 1 (REAL BUG) finding.** Omitting it is deliberate: ship re-reviews it, which is the regression check on your fix. Logging it as `skipped` would suppress the one finding you most need re-verified.
@@ -394,14 +603,17 @@ Regardless of verdict:
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-restore.sh" "$RUN_DIR"
 ```
 
-Two independent undos, each separately gated, which is why this is a script:
+Three independent undos, each separately gated, which is why this is a script:
 
 - `RESET` drops the checkpoint commit — **only** when it actually landed. Resetting after a failed commit would throw away the user's last real commit. The script also verifies HEAD still *is* the checkpoint before resetting, so a re-run after an interrupted pass reports `skipped_already_reset` instead of eating a commit.
-- `INDEX` restores the pre-review index with `git read-tree`, whenever `git add -A` ran — **including on `CHECKPOINT=failed`**. That is the case a "skip the restore in no-checkpoint mode" rule gets wrong: `add` had already staged everything. `read-tree` does not touch the worktree, so the staged/unstaged split comes back exactly as it was, including partially staged files that a re-`git add` by filename would have flattened.
+- `INDEX` restores the pre-review index with `git read-tree`, in exactly the two states where `git add -A` ran: `committed` and **`failed`**. `failed` is the case a "skip the restore in no-checkpoint mode" rule gets wrong — `add` had already staged everything. `read-tree` does not touch the worktree, so the staged/unstaged split comes back exactly as it was, including partially staged files that a re-`git add` by filename would have flattened.
+- `WORKTREE` removes the pr-remote checkout and deletes the temporary `refs/fresh-review/pr-<n>` ref. Reported only in that mode.
 
-Both are skipped when `CHECKPOINT=skipped` — nothing was staged, nothing was committed, nothing to undo.
+The index restore is gated on those two states **by name**, not on `≠ skipped`, and the difference only shows up in pr-remote mode: nothing was ever staged there, so a `read-tree` would restore an index snapshot the user never asked for and silently discard anything they staged while the review was running. That is a data-losing no-op with no output to notice it by — `INDEX: restored` looks exactly like success.
 
-Then tell the user: "Working tree restored — staged/unstaged split is back as it was."
+Everything is skipped when `CHECKPOINT=skipped` — nothing was staged, nothing was committed, nothing to undo.
+
+Then tell the user: "Working tree restored — staged/unstaged split is back as it was." In pr-remote mode say instead: "Your tree was never touched; the PR checkout has been removed."
 
 This must run even on abort or error. If the user interrupts mid-review, restoring the tree is the first thing you do on the next turn — `state.env` survives, so `fr-restore.sh "$RUN_DIR"` is all it takes.
 
@@ -410,19 +622,25 @@ This must run even on abort or error. If the user interrupts mid-review, restori
 Write `$RUN_DIR/report.md` (the Step 8 chat output verbatim, plus scope, pass inventory, and isolation-audit result), then `$RUN_DIR/run.json`:
 
 ```json
-{"skill":"fresh-review","schema":3,"run_id":"<RUN_ID>",
+{"skill":"fresh-review","schema":4,"run_id":"<RUN_ID>",
  "ts_start":"<TS_START>","ts_end":"<now>","duration_s":0,
  "repo":"<repo>","branch":"<BRANCH>","base":"<BASE>",
+ "mode":"<review|pr>",
+ "pr":{"number":0,"url":"","state":"","head":"","drift":false},
  "scope":"<REVIEW_SCOPE>","diff_base":"<DIFF_BASE>","checkpoint":"<CHECKPOINT_SHA>","risk":"<RISK>",
  "diff":{"files":0,"lines":0},
  "passes":[
    {"name":"lattice","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"cso","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
-   {"name":"codex","status":"ok","duration_s":0,"findings":0,"changed_verdict":false}],
+   {"name":"codex","status":"ok","duration_s":0,"findings":0,"changed_verdict":false},
+   {"name":"narrative","status":"ok","duration_s":0,"findings":0,"isolation":"clean",
+    "vocab":"<ddd-principles|atom-defaults>","title_mismatch":false}],
  "triage":{"real_bug":0,"by_design":0,"noise":0,"misread":0,"deduped":0},
  "verdict":"<VERDICT>","handoff_rc":0,
- "tools":{"gstack":0,"codex":0}}
+ "tools":{"gstack":0,"codex":0,"gh":0}}
 ```
+
+Omit `pr` outside pr-remote mode and the `narrative` pass outside `pr` mode — an absent pass and a failed one must stay distinguishable.
 
 Then:
 
@@ -439,8 +657,9 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - *Where does the time actually go?* Per-pass `duration_s` replaces the impression that "the run is slow" with the name of the pass that is slow.
 - *Is Codex earning its place?* `codex.duration_s` against `codex.changed_verdict` over a dozen runs is the evidence for keeping or dropping it.
 - *Which pass produces noise?* A pass whose findings land overwhelmingly in buckets 3 and 4 is miscalibrated for this repo and should be re-scoped or dropped.
+- *Is the narrative telling anyone anything?* `narrative.title_mismatch` over many pr-remote runs is the direct measure. If it is never true, the mode is producing pleasant restatements and its isolation is not buying what it costs; if it is often true, PR descriptions in this repo are not to be trusted, which is worth knowing on its own.
 
-**Schema history.** `schema:3` has three passes. `schema:2` entries carry a fourth `gstack` pass from when this skill ran `/review` itself; an analysis tool reading both must not treat that pass's absence in `schema:3` as a failure. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
+**Schema history.** `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
 
 ## Failure modes and recovery
 
@@ -451,9 +670,14 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Codex times out / fails** → verdict ships Claude-only, `CODEX_FAILED` in the log, `codex` omitted from the `passes` list. Never substitute a Claude pass for it. Fix is `codex login` and re-run.
 - **Subagent tries to fix code** → Step 6.5 catches it; `--revert` undoes it unless the checkpoint failed.
 - **User aborts midway** → `fr-restore.sh "$RUN_DIR"` first, then report what was collected.
-- **Forbidden read detected** → Step 6 handles it: note, downgrade confidence, optionally re-spawn.
+- **Forbidden read detected** → Step 6 handles it: note, downgrade confidence, optionally re-spawn. A Pass N leak is the exception — label the narrative contaminated or drop it, never print it clean.
 - **`runs.jsonl` fails to validate** → the line is dropped, `$RUN_DIR/run.json` is kept, tell the user.
 - **Handoff fails** (`SHIP_GATE: will_not_fire`) → continue, and tell the user ship will re-dispatch its full army and re-ask about triaged findings.
+- **`PR: unresolved`** → stop, print `REASON` and its remedy from Step 1.5. Never fall back to reviewing the local branch: it would answer a question about PR #42 with a review of something else entirely.
+- **Pass N returns prose instead of the block**, or returns file paths and function names → do not print it. Re-spawn once with the constraint list repeated; on a second failure print the review block alone and note `narrative ✗ format`. A narrative full of file paths is a diff summary, which the user can already get from `git diff --stat`.
+- **Pass N invents a domain story for a tooling-only change** → print the review block alone and note it. This is the failure that makes the whole mode untrustworthy, so it is worth a `NOTES` line in the run log rather than a silent drop.
+- **PR head moves mid-review** (`HEAD_DRIFT: yes`) → not an error. Everything was reviewed at `PR_HEAD`; say so in the header and move on. Do not re-fetch — that would mix two commits' findings in one report.
+- **PR worktree survives the run** (`WORKTREE: failed`) → tell the user the path and that `git worktree remove --force <path>` clears it. Do not leave it undisclosed; it is a full checkout's worth of disk.
 
 ## What this skill does NOT do
 
@@ -465,6 +689,10 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Run the CI gates.** Tests, coverage, and lint are `/ship`'s job. A `COMMIT` verdict says the code reads correctly, not that it passes.
 - **Stop `/ship` from reviewing again.** Ship's pre-landing review is unconditional and reviews the *final* diff — post-fix, post-CHANGELOG, post-base-merge — a different artifact from what these passes saw. `references/ship-dispatch-gate.md` trims the parts that are genuinely duplicated; the rest is supposed to run.
 - **Analyze runs across sessions.** The log is written to be analyzable; reading it is a separate tool's job.
+- **Post anything to GitHub.** The narrative is printed to chat and written to disk, never sent. No `gh pr comment`, no `gh pr review`, no `gh pr edit --body`, not even in pr-remote mode where a PR is plainly sitting there — publishing a review under the user's name is theirs to decide, and an unattended run inside `/loop` must not be able to do it. If they want it posted, they will say so, and that is a separate action taken with the text in front of them.
+- **Modify the PR under review.** pr-remote mode is read-only on someone else's branch. Findings are comments; the worktree is disposable and gets deleted.
+- **Review a PR from another repo.** `foreign_repo` stops it. There is no local tree to materialize the head into, and a patch without its source tree produces reviewers reading the wrong file contents. Clone that repo and run there.
+- **Replace reading the diff.** The narrative is at product altitude by construction — no paths, no names, no code. It tells you what changed and what it means; it cannot tell you whether line 84 is right. It is an orientation and a cross-check, not a substitute for review, which is exactly why this mode never ships it without one.
 
 ## Examples
 
@@ -472,6 +700,16 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 
 **"review this before I push"** with `auth/` in the diff → `fr-packet.sh` returns `RISK: high` on `PATH_HITS`; `/cso` upgrades to `--diff --comprehensive`; three sources triaged under the security floor.
 
-**"fresh review, then ship"** → identical run; nothing is skipped or added, because this skill has one mode. The handoff arms the ship-side gate, and `/ship` then trims the specialists this run already covered while still running the four structural ones on the final diff.
+**"fresh review, then ship"** → the default run, nothing added. The handoff arms the ship-side gate, and `/ship` then trims the specialists this run already covered while still running the four structural ones on the final diff.
 
 **Codex still running when the Claude passes return** → verdict prints as `codex ⧗ running`; the background task completes eight minutes later; Step 8.5 posts the addendum and records whether it moved the verdict.
+
+**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, same three critics, plus Pass N and Step 4.5's vocabulary resolution. Chat gets the narrative, then the verdict and every finding. Handoff and restore run as normal, because this is still your branch.
+
+**"review PR 42"** → `--pr 42`. Step 1.5 resolves it, fetches `pull/42/head`, and builds a detached worktree; Step 3 is skipped; the four passes read the PR's diff and open files from the PR's tree. Verdict prints as `APPROVE-WITH-COMMENTS`, bucket 2 admits only standards citations, no handoff, and Step 9 deletes the worktree. Your own uncommitted work is untouched throughout — and nothing is posted to the PR.
+
+**"explain PR 42 for the standup"** with no `.lattice/standards/ddd-principles.md` → identical run, `VOCAB: atom-defaults`. The narrative uses generic domain terms and nouns lifted from the code's own naming, the report says so in one line, and the review still runs in full.
+
+**A tooling-only PR** — CI workflow and lockfile → Pass N returns `HEADLINE: this change has no domain meaning; it is CI and dependency work`, every domain section `none`. That is the correct output, printed as-is. `RISK: high` still fires on the IaC path, so `/cso` runs comprehensive over it.
+
+**The PR title says "add refund support"; the narrative says a fee is recorded but never reversed** → the `⚠` mismatch line in Step 8, `title_mismatch: true` in the run log. This is the outcome the whole isolation contract exists to make possible.
