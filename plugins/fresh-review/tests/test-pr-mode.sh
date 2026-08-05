@@ -47,6 +47,17 @@ EOF
 chmod +x "$BIN/gh"
 export PATH="$BIN:$PATH"
 
+# A PATH holding everything fr-pr-resolve.sh needs except gh, for the
+# gh_missing case. Naming the dependency set beats trimming directories out of
+# $PATH: on a GitHub runner gh and git share /usr/bin, so dropping the directory
+# that carries gh would take git with it and the case would fail for the wrong
+# reason — which is exactly how it first failed in CI.
+NOGH="$TMP/nogh"
+mkdir -p "$NOGH"
+for t in bash sh git sed python3 rm mkdir grep cat wc date tr; do
+  ln -sf "$(command -v "$t")" "$NOGH/$t"
+done
+
 # --- origin, with a PR ref, and a clone ---------------------------------------
 ORIGIN="$TMP/origin"
 mkdir -p "$ORIGIN"
@@ -191,7 +202,7 @@ resolve_with() { # pr_ref [no-gh]
   (cd "$wt" && bash "$SCRIPTS/fr-preflight.sh" --pr "$1" > "$TMP/neg-pf.out" 2>&1)
   local rd; rd="$(key "$TMP/neg-pf.out" RUN_DIR)"
   if [ "${2:-}" = "no-gh" ]; then
-    (cd "$wt" && PATH="/usr/bin:/bin" bash "$SCRIPTS/fr-pr-resolve.sh" "$rd" > "$out" 2>&1)
+    (cd "$wt" && PATH="$NOGH" bash "$SCRIPTS/fr-pr-resolve.sh" "$rd" > "$out" 2>&1)
   else
     (cd "$wt" && bash "$SCRIPTS/fr-pr-resolve.sh" "$rd" > "$out" 2>&1)
   fi

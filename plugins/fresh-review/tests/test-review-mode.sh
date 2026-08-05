@@ -32,6 +32,13 @@ G -C "$ORIGIN" add -A && G -C "$ORIGIN" commit -q -m base
 
 WT="$TMP/wt"
 git clone -q "$ORIGIN" "$WT"
+# fr-checkpoint.sh runs a plain `git commit`, so the repo under test needs an
+# identity of its own. Every real user has one; a CI runner does not, and without
+# this the checkpoint fails there and five assertions below read as regressions
+# in restore rather than as a missing git config.
+git -C "$WT" config user.email fresh-review-test@example.invalid
+git -C "$WT" config user.name "fresh-review test"
+git -C "$WT" config commit.gpgsign false
 
 # A staged file and a separately modified unstaged file: the split restore has to
 # put back exactly as it found it.
