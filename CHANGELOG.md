@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 — 2026-08-23
+
+### New plugin `vault-tools` 0.1.0: ingest, query, and lint for the second-brain vault
+
+Three skills that operate an LLM-maintained Obsidian vault following the LLM-Wiki pattern:
+`vault-ingest` turns a raw source into a literature note plus fused atomic zettels,
+`vault-query` answers a question from the vault's own notes with citations, and `vault-lint`
+produces a health-check report of duplicates, orphans, dead links, and stale content.
+
+**Each skill defers to the vault's `AGENTS.md` rather than restating it.** Every skill opens
+by loading `AGENTS.md` in full and treats it as the single source of truth — "if this
+conflicts with AGENTS.md, AGENTS.md wins." The skills encode only the workflow steps and the
+triggers; the folder map, naming, tags, language rules, and guardrails live in one place, so
+the vault's contract can change without a plugin release chasing it.
+
+**They are packaged as a plugin so plugin-update keeps them current.** The skills are
+vault-specific but distributed the same way as the rest of the marketplace — installed and
+updated through the plugin system, not hand-copied into `~/.claude/skills`, which drifts.
+
+`everything` 0.2.0 → 0.3.0 now depends on `vault-tools`.
+
 ## 0.5.0 — 2026-08-05
 
 ### `fresh-review` 0.3.1 → 0.4.0: a PR review mode that explains the change in plain English

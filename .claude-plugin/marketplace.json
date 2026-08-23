@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "ShuratCode-skills",
   "description": "Shaked Eyal's personal skills for Claude Code and Claude Desktop (Cowork).",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "owner": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"
@@ -62,6 +62,20 @@
         "search",
         "kosher",
         "vegetarian"
+      ]
+    },
+    {
+      "name": "vault-tools",
+      "source": "./plugins/vault-tools",
+      "description": "Ingest, query, and lint operations for an LLM-maintained Obsidian second-brain vault, each deferring to the vault's AGENTS.md.",
+      "category": "personal",
+      "keywords": [
+        "obsidian",
+        "vault",
+        "zettelkasten",
+        "second-brain",
+        "ingest",
+        "notes"
       ]
     },
     {
