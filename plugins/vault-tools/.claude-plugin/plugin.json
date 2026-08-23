@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "vault-tools",
-  "version": "0.1.0",
-  "description": "Ingest, query, and lint operations for Shaked's LLM-maintained Obsidian second-brain vault. Each skill defers to the vault's AGENTS.md as the single source of truth.",
+  "version": "0.2.0",
+  "description": "Ingest, query, lint, book-digest, and book-note operations for Shaked's LLM-maintained Obsidian second-brain vault. Each skill defers to the vault's AGENTS.md as the single source of truth.",
   "author": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/ShuratCode/ShuratCode-skills",
   "repository": "https://github.com/ShuratCode/ShuratCode-skills",
   "license": "MIT",
-  "keywords": ["obsidian", "vault", "zettelkasten", "second-brain", "ingest", "knowledge", "notes", "llm-wiki"]
+  "keywords": ["obsidian", "vault", "zettelkasten", "second-brain", "ingest", "knowledge", "notes", "llm-wiki", "books", "library"]
 }
