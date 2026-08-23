@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.0 — 2026-08-23
+
+### `vault-tools` 0.2.0 → 0.3.0: podcast ingest — `vault-podcast`
+
+The vault's `Podcasts/` pipeline (capture note, source ladder, `transcribe.sh`, Dashboard)
+existed in `AGENTS.md` and on disk, but nothing drove it. `vault-podcast` is the sixth
+`vault-tools` skill and the agent side of that pipeline, deferring to `AGENTS.md` as the
+single source of truth and encoding only the podcast-specific workflow.
+
+**`vault-podcast` — turn a podcast episode into wiki.** Everything about it follows from one
+fact: the agent cannot hear audio, so the durable knowledge is in the ideas discussed, never
+a file it can open. It creates the capture note in `Podcasts/Inbox` (the sanctioned raw-layer
+exception) and climbs the source ladder — published transcript (rung 1), Shaked's takeaways
+(rung 2), show notes (rung 3), nothing (rung 4) — announcing the rung it lands on. Its spine
+is the hard stop: on rung 3 or 4 it reports what's missing and asks (transcribe with `medium`
+for Hebrew / give takeaways / `verdict: skip`) rather than write zettels from a marketing
+blurb — the same guardrail-1 failure as the book-digest empty-notes stop. From a rung-1/2
+source it runs the standard Ingest: discuss-then-write, literature note plus verdict-gated
+zettels fused into existing notes, index/log, ingest stamp, archive move, one commit, reindex.
+
+Supports the Triage and Discuss trigger modes (Discuss — "I listened to X, here's what stuck"
+— is first-class, since rung 2 is often all there is and often the better filter). Hebrew
+episodes produce Hebrew notes; the two legacy `Podcast`-tagged zettels are flagged for lint,
+not silently retagged, and stand as fusion targets for new management / LLM-security material.
+
+No vault content was modified — repo-only. Verified by dry-running the reasoning on two real
+episodes (Radical Candor S1E15, Lang Talks / Itamar Golan); both correctly hard-stop and
+write nothing.
+
 ## 0.7.0 — 2026-08-23
 
 ### `vault-tools` 0.1.0 → 0.2.0: two book skills — `vault-book-digest` and `vault-book-note`
