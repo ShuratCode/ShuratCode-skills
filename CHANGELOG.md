@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.1 — 2026-08-23
+
+### `fresh-review` 0.4.0 → 0.4.1: fix cross-marketplace dependency so the skill loads
+
+After a Claude Code upgrade the `fresh-review` skill stopped appearing in the skill listing.
+Root cause: `plugin.json` declared its lattice dependency as the string `"lattice@lattice"`.
+The `plugin@marketplace` string form is not a valid `dependencies` entry — cross-marketplace
+dependencies must use the object form. The resolver could not satisfy the dependency, so Claude
+Code disabled the whole plugin, taking its skill with it. Every sibling ShuratCode plugin kept
+loading because none declares a cross-marketplace dependency.
+
+**Fix.** Changed the dependency to `{ "name": "lattice", "marketplace": "lattice" }`. The
+`allowCrossMarketplaceDependenciesOn: ["lattice"]` allow-list in `marketplace.json` was already
+correct and is unchanged. Picked up after merge by re-syncing the marketplace.
+
 ## 0.8.0 — 2026-08-23
 
 ### `vault-tools` 0.2.0 → 0.3.0: podcast ingest — `vault-podcast`
