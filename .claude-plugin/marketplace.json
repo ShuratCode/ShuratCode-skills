@@ -67,7 +67,7 @@
     {
       "name": "vault-tools",
       "source": "./plugins/vault-tools",
-      "description": "Ingest, query, lint, book-digest, and book-note operations for an LLM-maintained Obsidian second-brain vault, each deferring to the vault's AGENTS.md.",
+      "description": "Ingest, query, lint, book-digest, book-note, and podcast operations for an LLM-maintained Obsidian second-brain vault, each deferring to the vault's AGENTS.md.",
       "category": "personal",
       "keywords": [
         "obsidian",
@@ -76,7 +76,8 @@
         "second-brain",
         "ingest",
         "notes",
-        "books"
+        "books",
+        "podcasts"
       ]
     },
     {
