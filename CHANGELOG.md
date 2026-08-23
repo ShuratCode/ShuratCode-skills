@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.0 — 2026-08-23
+
+### `vault-tools` 0.1.0 → 0.2.0: two book skills — `vault-book-digest` and `vault-book-note`
+
+The vault's `AGENTS.md` grew a full **Book digest flow** (2026-08-23), mirroring the new
+podcast pipeline: books are a raw source whose text never enters the vault, so the only
+material a digest has is what Shaked wrote in a book note's `## Notes`. Two skills implement
+that contract, both deferring to `AGENTS.md`.
+
+**`vault-book-digest` — turn a read book's notes into wiki.** Triggers only on `status: read`
++ `verdict` set + `## Notes` with substance (the `Library.base` → Ingest Queue set); never
+sweeps `Books/`. Its spine is the hard stop: a `verdict` on an empty `## Notes` means there is
+nothing to digest, so it stops rather than manufacture a book report from a title and a rating
+— the book-shaped version of the podcast rung-3 stop, and the same guardrail-1 failure. It
+corrects Shaked's fast-written names and dates and fact-checks the digest, but never pads from
+general knowledge of the book (yield is bounded by his notes, not the book's length); carries
+his own observations over attributed to him; writes the digest to `20 Literature/` only,
+leaving `Books/` the ingest stamp; and consolidates zettels hard — the exemplar book was cut
+from 56 zettels to 6.
+
+**`vault-book-note` — create or fix a book's metadata.** Give it a title and it web-searches
+the bibliographic facts (author, language, year, cover) and writes a new book note, or fills/
+corrects those fields on an existing one. Metadata only: it never touches `## Notes` /
+`## Review` or Shaked's curation fields (`rating`, `verdict`, `status`, dates), and never the
+digest stamp. Like the digest skill it treats any non-stamp write to `Books/` as a
+Shaked-authorized carve-out pending an `AGENTS.md` amendment, and confirms before writing.
+
+Design decisions taken with Shaked: digest only at `status: read` (a book he's still reading
+waits, even with rich notes); re-digests update the literature note in place; the agent's hard
+stop — not a new `Library.base` surface — is the guard for the empty-notes trap the Bases
+filter can't see. Both skills still await their first run on a real book, which is the true
+test of whether the spec survives contact with an actual note.
+
 ## 0.6.0 — 2026-08-23
 
 ### New plugin `vault-tools` 0.1.0: ingest, query, and lint for the second-brain vault
