@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.10.0 — 2026-08-26
+
+### `fresh-review` 0.5.0 → 0.6.0: generate a pinned, vendored copy for consumer repos
+
+The Claude Desktop app cannot execute typed `/plugin:command` slash commands, so a team
+cannot consume fresh-review as a plugin there — the desktop `/` menu lists a skill but returns
+`Unknown command` when one is selected, and natural-language triggering is the only route.
+The way a repo actually gets fresh-review in both terminal and desktop is a git-committed
+**project skill** at `<repo>/.claude/skills/fresh-review/`. To keep a single maintained source
+without hand-copying, this release adds a generator.
+
+- **`scripts/vendor.sh <target-skill-dir>`** copies `SKILL.md` and every `fr-*.sh` (never
+  itself, never non-`fr-*` scripts) into the target, rewriting all 13
+  `${CLAUDE_PLUGIN_ROOT}/scripts/` references to
+  `$(git rev-parse --show-toplevel)/.claude/skills/fresh-review/scripts/` so the vendored
+  scripts resolve from any cwd inside the consumer repo with no plugin root. Prose mentions of
+  `~/.claude/skills/...` (gstack/cso/ship) are left intact — consumers have gstack (full tier).
+  It writes a `.fresh-review-version` pin/drift stamp (`<version>  <short sha>`) and is
+  idempotent.
+- **`tests/test-vendor.sh`** asserts zero surviving `${CLAUDE_PLUGIN_ROOT}` in the output, all
+  `fr-*.sh` present and executable, `vendor.sh` absent from the output, and a stamped version
+  matching `plugin.json`. Picked up automatically by `scripts/test.sh`.
+
+### `upgrade-all` 0.4.0 → 0.5.0: offer to sync vendored consumers after a fresh-review bump
+
+After the plugin updates, when the SUMMARY shows `fresh-review: UPGRADED`, the skill now offers
+to re-vendor consumer repos. It resolves the freshly-installed `vendor.sh` from the version-keyed
+cache (falling back to a marketplace checkout or local clone), pre-suggests repos that carry a
+`.fresh-review-version` stamp, asks which path(s) to sync (generic — never hardcodes a target),
+runs the generator, reports the stamp change and touched files, and offers a per-repo branch +
+commit while leaving the PR to the user.
+
 ## 0.9.0 — 2026-08-25
 
 ### `fresh-review` 0.4.1 → 0.5.0: add a slash command so the desktop app can run the review
