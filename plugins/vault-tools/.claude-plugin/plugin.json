@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "vault-tools",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Ingest, query, lint, book-digest, book-note, and podcast operations for Shaked's LLM-maintained Obsidian second-brain vault. Each skill defers to the vault's AGENTS.md as the single source of truth.",
   "author": {
     "name": "Shaked Eyal",

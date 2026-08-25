@@ -213,6 +213,47 @@ for sk in sorted(pathlib.Path("plugins").glob("*/skills/*/SKILL.md")):
             f"use ${{CLAUDE_PLUGIN_ROOT}}")
     ok(f"{sk}: no self-referential ~/.claude/skills paths")
 
+# ------------------------------------------------- desktop command coverage
+# The Claude Desktop app's `/` menu only *executes* real command files; it lists
+# a skill for discovery but returns "Unknown command" when one is selected. The
+# terminal CLI auto-bridges skills into slash commands, so a skill-only plugin
+# works there and the gap is invisible. Every code skill therefore needs a
+# command wrapper that delegates to it — with a DISTINCT name, because a command
+# and skill that share a name collide and the skill wins, shadowing the command.
+head("Desktop command coverage")
+for sk in sorted(pathlib.Path("plugins").glob("*/skills/*/SKILL.md")):
+    skill = sk.parent.name
+    plugin_dir = sk.parents[2]
+    cmd_dir = plugin_dir / "commands"
+    cmds = sorted(cmd_dir.glob("*.md")) if cmd_dir.is_dir() else []
+
+    wrapper = None
+    for c in cmds:
+        if c.stem == skill:
+            continue  # same name — the skill shadows it, so it is not a route
+        _, body = frontmatter(c)
+        if skill in (body or ""):
+            wrapper = c
+            break
+
+    if wrapper is None:
+        if any(c.stem == skill for c in cmds):
+            err(f"{plugin_dir.name}: command '{skill}.md' shares the skill's name — "
+                f"the skill shadows it; rename the command so the desktop route works")
+        else:
+            err(f"{plugin_dir.name}: skill '{skill}' has no desktop command wrapper — "
+                f"it returns 'Unknown command' in the desktop app. Add a distinctly-named "
+                f"command in {cmd_dir}/ that delegates to it.")
+        continue
+
+    wf = parse_fm(frontmatter(wrapper)[0] or "")
+    if not wf.get("description"):
+        err(f"{wrapper}: command wrapper missing 'description' (desktop menu label)")
+    if "$ARGUMENTS" not in wrapper.read_text():
+        err(f"{wrapper}: command wrapper does not forward $ARGUMENTS to the skill")
+    else:
+        ok(f"{plugin_dir.name}: {skill} -> /{plugin_dir.name}:{wrapper.stem}")
+
 # ------------------------------------------------------------- chat skills
 head("Chat skills (claude.ai constraints)")
 for sk in sorted(pathlib.Path("chat-skills").glob("*/SKILL.md")):
