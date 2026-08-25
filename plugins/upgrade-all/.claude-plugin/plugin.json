@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "upgrade-all",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Run all routine local upgrades in one flow: Homebrew formulas and casks with cleanup, gstack upgrade, and Claude Code plugin updates.",
   "author": {
     "name": "Shaked Eyal",
