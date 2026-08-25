@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.9.0 — 2026-08-25
+
+### `fresh-review` 0.4.1 → 0.5.0: add a slash command so the desktop app can run the review
+
+The `fresh-review` skill could not be run from the Claude Desktop app. Selecting
+`/fresh-review:fresh-review` from the desktop `/` menu returned `Unknown command: /fresh-review:fresh-review`.
+Root cause: the plugin shipped only a skill (`skills/fresh-review/SKILL.md`) and no command file. The
+terminal CLI auto-bridges a skill into a `/plugin:skill` slash command, so it worked there; the desktop
+app's slash executor only runs real command files, so it listed the skill for discoverability but had
+nothing to execute. (Sibling plugins that work in desktop — e.g. sparkpilot — ship real `commands/*.md`.)
+
+**Fix.** Added `commands/review.md` → `/fresh-review:review`, a thin wrapper whose prompt hands the user's
+arguments verbatim to the fresh-review skill via the Skill tool. A distinct command name was required: when
+a command and a skill share a name, the skill takes precedence, so a same-named command would be shadowed in
+the CLI and never reach the desktop's command route. The skill still resolves its own mode (default
+pre-commit review vs. `pr` mode) from the passed arguments — `SKILL.md` remains the single source of truth
+and is unchanged. CLI invocation (`/fresh-review:fresh-review`, bare `/fresh-review`) is unaffected; desktop
+users now select `/fresh-review:review`.
+
+### Desktop command wrappers for the remaining skill-only plugins
+
+An audit found every other skill-only plugin had the same desktop gap: selecting `/<plugin>:<skill>` from the
+desktop `/` menu returned `Unknown command`, because none shipped a command file. Added a distinctly-named
+thin command wrapper per skill (each delegates to its skill via the Skill tool, passing `$ARGUMENTS`
+verbatim). A distinct name is required — a same-named command is shadowed by its skill. Natural-language
+triggering already worked in desktop and is unchanged; these wrappers add the slash-menu route.
+
+- **`pull-all` 0.1.0 → 0.2.0** — `commands/run.md` → `/pull-all:run`.
+- **`upgrade-all` 0.3.0 → 0.4.0** — `commands/run.md` → `/upgrade-all:run`.
+- **`restaurant-search` 0.1.0 → 0.2.0** — `commands/search.md` → `/restaurant-search:search`.
+- **`vault-tools` 0.3.0 → 0.4.0** — one wrapper per skill: `/vault-tools:ingest`, `:query`, `:lint`,
+  `:book-digest`, `:book-note`, `:podcast` (the skills keep their `vault-` prefixed names).
+
+The `everything` meta-plugin ships no skills of its own, so it needs no wrapper.
+
 ## 0.8.1 — 2026-08-23
 
 ### `fresh-review` 0.4.0 → 0.4.1: fix cross-marketplace dependency so the skill loads

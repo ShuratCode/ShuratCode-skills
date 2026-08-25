@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "restaurant-search",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Find restaurants in a given area that are verifiably open at a given time and verifiably serve a qualifying dish, by searching the web and reading real menus.",
   "author": {
     "name": "Shaked Eyal",

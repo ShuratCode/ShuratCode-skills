@@ -38,6 +38,12 @@ Or take everything at once:
 Each skill is then callable as `/<plugin>:<skill>` — e.g. `/fresh-review:fresh-review` —
 and as bare `/fresh-review` when the name doesn't collide.
 
+> **Desktop app (Cowork).** The `/<plugin>:<skill>` form is a terminal-CLI convenience: the CLI
+> auto-bridges every skill into a slash command. The desktop app's `/` menu *lists* skills but only
+> *executes* real command files, so selecting `/fresh-review:fresh-review` there returns
+> `Unknown command`. In the desktop app, run `fresh-review` via the command **`/fresh-review:review`**,
+> or just describe the task in plain English and let the skill trigger on its description.
+
 ### Dependencies install themselves
 
 `fresh-review` declares `"dependencies": ["lattice@lattice"]`, so installing it also
