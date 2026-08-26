@@ -55,7 +55,20 @@ want "$TMP/pf.out" MODE review "preflight with no arguments"
 want "$TMP/pf.out" PR_REF none "preflight with no arguments"
 want "$TMP/pf.out" REVIEW_SCOPE branch "preflight with no arguments"
 want "$TMP/pf.out" SOURCE_ROOT "$WT" "preflight with no arguments"
+# Codex is opt-in: the default run must not request it.
+want "$TMP/pf.out" CODEX_REQUESTED 0 "preflight with no arguments"
 RUN_DIR="$(key "$TMP/pf.out" RUN_DIR)"
+
+# --codex opts the run into Pass C, and it round-trips into state.env.
+(cd "$WT" && bash "$SCRIPTS/fr-preflight.sh" --codex > "$TMP/pfcx.out" 2>&1)
+want "$TMP/pfcx.out" CODEX_REQUESTED 1 "preflight with --codex"
+want "$TMP/pfcx.out" MODE review "preflight with --codex (mode unaffected)"
+CXSTATE="$(key "$TMP/pfcx.out" STATE)"
+if ( set -eu; . "$CXSTATE"; [ "$CODEX_REQUESTED" = "1" ] ) 2>/dev/null; then
+  ok "state.env carries CODEX_REQUESTED=1 under --codex"
+else
+  bad "state.env CODEX_REQUESTED under --codex" "1" "not re-sourceable or not 1"
+fi
 
 # Bad arguments must be rejected loudly, not absorbed into a default mode.
 (cd "$WT" && bash "$SCRIPTS/fr-preflight.sh" --mode nonsense > "$TMP/badarg.out" 2>&1)

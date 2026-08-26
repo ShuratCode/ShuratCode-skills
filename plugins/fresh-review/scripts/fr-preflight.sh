@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fr-preflight.sh [--mode review|pr] [--pr <number|url>] — Step 1 + Step 2.
+# fr-preflight.sh [--mode review|pr] [--pr <number|url>] [--codex] — Step 1 + Step 2.
 # Probes the repo, resolves the review scope, creates the run directory, and
 # writes the state file every later script reads.
 #
@@ -8,12 +8,16 @@
 # the review off the local branch, at which point scope resolution is finished by
 # fr-pr-resolve.sh rather than here.
 #
+# --codex opts the run into the cross-model Codex pass (Pass C). It is off by
+# default: Codex runs only when the invocation explicitly asks for it, and only
+# then if `codex` is also on PATH. The flag is orthogonal to --mode and --pr.
+#
 # Output contract (stdout): one block, keys only, no diff content.
 #   === FRESH-REVIEW PREFLIGHT ===
 #   STATUS: ok | stop
 #   STOP_REASON: <slug>            (only when STATUS: stop)
 #   RUN_DIR / STATE / MODE / PR_REF / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE
-#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_CFG / GSTACK_BIN
+#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / CODEX_CFG / GSTACK_BIN
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_CMD
 #   === END ===
 #
@@ -26,11 +30,13 @@ emit() { printf '%s\n' "$1"; }
 
 MODE=review
 PR_REF=""
+CODEX_REQUESTED=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
-    --pr)   PR_REF="${2:?--pr needs a value}"; MODE=pr; shift 2 ;;
-    *)      echo "fr-preflight: unknown argument '$1'" >&2; exit 2 ;;
+    --mode)  MODE="${2:?--mode needs a value}"; shift 2 ;;
+    --pr)    PR_REF="${2:?--pr needs a value}"; MODE=pr; shift 2 ;;
+    --codex) CODEX_REQUESTED=1; shift ;;
+    *)       echo "fr-preflight: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
 case "$MODE" in
@@ -151,6 +157,7 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
   kv HAS_GSTACK "$HAS_GSTACK"
   kv HAS_CODEX "$HAS_CODEX"
   kv HAS_GH "$HAS_GH"
+  kv CODEX_REQUESTED "$CODEX_REQUESTED"
   kv CODEX_CFG "$CODEX_CFG"
   kv REVIEW_SCOPE "$REVIEW_SCOPE"
   kv DIFF_CMD "$DIFF_CMD"
@@ -173,6 +180,7 @@ emit "INDEX_TREE: $INDEX_TREE"
 emit "HAS_GSTACK: $HAS_GSTACK"
 emit "HAS_CODEX: $HAS_CODEX"
 emit "HAS_GH: $HAS_GH"
+emit "CODEX_REQUESTED: $CODEX_REQUESTED"
 emit "CODEX_CFG: $CODEX_CFG"
 emit "GSTACK_BIN: ${GSTACK_BIN:-none}"
 emit "SOURCE_ROOT: $REPO_ROOT"
