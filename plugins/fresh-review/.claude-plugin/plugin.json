@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fresh-review",
-  "version": "0.6.1",
-  "description": "Code review with enforced producer/reviewer context separation. Runs the lattice review, the gstack security audit, and a background cross-model Codex pass against one shared diff packet via context-isolated subagents, then triages the findings back in the producer context and logs the run. A second mode reviews a PR — yours or someone else's, by number or URL — and adds a plain-English account of what the change does in the repo's own DDD vocabulary, written from the code alone so it can contradict the PR description. Deliberately skips gstack's /review — /ship runs that on the final diff — and ships a dispatch gate that trims the parts of ship's own review army this run already covered.",
+  "version": "0.7.0",
+  "description": "Code review with enforced producer/reviewer context separation. Runs the lattice review and the gstack security audit against one shared diff packet via context-isolated subagents, then triages the findings back in the producer context and logs the run. An opt-in background cross-model Codex pass runs only when the invocation asks for it (--codex). A second mode reviews a PR — yours or someone else's, by number or URL — and adds a plain-English account of what the change does in the repo's own DDD vocabulary, written from the code alone so it can contradict the PR description. Deliberately skips gstack's /review — /ship runs that on the final diff — and ships a dispatch gate that trims the parts of ship's own review army this run already covered.",
   "author": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.12.0 — 2026-08-26
+
+### `fresh-review` 0.6.1 → 0.7.0: Codex is opt-in
+
+The cross-model Codex pass (Pass C) used to run on every review whenever `codex` was on PATH. It now
+runs **only when the invocation asks for it**. The default run is the two Claude critics (lattice +
+`/cso`); Codex is added with a new `--codex` flag, resolved once from the request ("with codex",
+"cross-model review", "codex pass").
+
+- **`fr-preflight.sh`** gains a `--codex` flag (off by default) and writes/emits `CODEX_REQUESTED`.
+  The flag is orthogonal to `--mode` and `--pr`. Risk class never conscripts Codex — it gates
+  `/cso`'s depth only.
+- **Pass C** launches in Step 5 only when `CODEX_REQUESTED: 1` and `HAS_CODEX: 1`. The Step 6 join,
+  Step 8.5 addendum, pass line, and triage convergence all treat an un-requested Codex as absent —
+  distinct from a requested one that failed.
+- **Handoff to `/ship`.** A Codex-off run hands ship `lattice,cso`, so ship runs its own structured
+  and adversarial Codex on the final diff. `fr-ship-gate.sh` already conditions its Codex cuts on
+  `codex` being in the logged passes, so no gate change was needed. `references/ship-dispatch-gate.md`
+  now states this explicitly.
+- **Run log schema 5.** Adds `codex_requested`; the `codex` pass is omitted from `passes[]` when the
+  run did not request it (a never-launched pass is distinct from a failed one). Readers of `schema:4`
+  assume `codex_requested: true`, since Codex ran unconditionally then.
+
 ## 0.11.1 — 2026-08-26
 
 ### `fresh-review` 0.6.0 → 0.6.1: fix six correctness findings from PR review
