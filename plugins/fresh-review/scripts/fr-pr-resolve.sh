@@ -124,6 +124,13 @@ case "$REPORT_DIR" in
 esac
 rm -rf "$PR_WT"
 if ! git worktree add --quiet --detach "$PR_WT" "$PR_HEAD" 2>"$RUN_DIR/raw/pr-worktree.err"; then
+  # A partial `git worktree add` can register the admin entry AND leave the
+  # directory on disk, so `git worktree prune` (which only reaps entries whose
+  # directory is gone) will not remove it — and PR_WT was never persisted, so
+  # fr-restore.sh cannot clean it up either. Force-remove the entry and the
+  # directory here before returning, or the leak is permanent.
+  git worktree remove --force "$PR_WT" >/dev/null 2>&1 || true
+  rm -rf "$PR_WT"
   git worktree prune >/dev/null 2>&1 || true
   unresolved "worktree_failed"
 fi
@@ -138,22 +145,24 @@ DIFF_CMD="git diff $DIFF_BASE $PR_HEAD"
 # untouched and still present. See fr-mutation-check.sh.
 git status --porcelain > "$RUN_DIR/raw/pre-fanout.status"
 
-{
-  echo "CHECKPOINT='pr_remote'"
-  echo "CHECKPOINT_SHA='$PR_HEAD'"
-  echo "REVIEW_SCOPE='$REVIEW_SCOPE'"
-  echo "DIFF_CMD='$DIFF_CMD'"
-  echo "DIFF_BASE='$DIFF_BASE'"
-  echo "SOURCE_ROOT='$PR_WT'"
-  echo "PR_WT='$PR_WT'"
-  echo "PR_LOCAL_REF='$PR_LOCAL_REF'"
-  echo "PR_NUMBER='$PR_NUMBER'"
-  echo "PR_HEAD='$PR_HEAD'"
-  echo "PR_BASE_NAME='$PR_BASE_NAME'"
-  echo "PR_FORK='$PR_FORK'"
-  echo "HEAD_DRIFT='$HEAD_DRIFT'"
-  echo "PR_RESOLVED='1'"
-} >> "$STATE"
+# Every value goes through kv, not raw echo: SOURCE_ROOT/PR_WT carry a filesystem
+# path and PR_BASE_NAME a branch name, either of which can hold a `'` that would
+# otherwise unbalance the quoting and break the `.` source in every later script —
+# the same class of bug fixed in fr-preflight.sh.
+kv CHECKPOINT "pr_remote"
+kv CHECKPOINT_SHA "$PR_HEAD"
+kv REVIEW_SCOPE "$REVIEW_SCOPE"
+kv DIFF_CMD "$DIFF_CMD"
+kv DIFF_BASE "$DIFF_BASE"
+kv SOURCE_ROOT "$PR_WT"
+kv PR_WT "$PR_WT"
+kv PR_LOCAL_REF "$PR_LOCAL_REF"
+kv PR_NUMBER "$PR_NUMBER"
+kv PR_HEAD "$PR_HEAD"
+kv PR_BASE_NAME "$PR_BASE_NAME"
+kv PR_FORK "$PR_FORK"
+kv HEAD_DRIFT "$HEAD_DRIFT"
+kv PR_RESOLVED "1"
 kv PR_URL "$PR_URL"
 kv PR_STATE "$PR_STATE"
 

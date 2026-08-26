@@ -11,6 +11,12 @@
 # So the assertions below are on the resolved *tier*, never on "the script ran".
 # A gate that always returns none passes any weaker check.
 #
+# The second bug this pins (finding 2, v0.6.1): the four CUT_* lines used to fire
+# whenever the matching pass had run, ignoring both drift and the prior run's
+# status. A cut removes a lens from ship's final gate, so it is only sound when
+# the reviewed tree is byte-identical to HEAD (tier2) AND the review was clean.
+# tier1 (any drift) and status:issues_found must both cut nothing.
+#
 # Case 1 also pins a second trap: feeding the selector via `python3 - <<PY`
 # instead of `python3 -c "$SCRIPT"` lets the heredoc claim stdin, the piped
 # entries never arrive, and the gate returns none again.
@@ -78,44 +84,75 @@ clean_() { rm -f "$REPO/dirt.txt"; }
 printf '\n\033[1mfr-ship-gate.sh\033[0m\n'
 
 # --- the regression: writer-format JSON must resolve to a real tier -----------
-FR_OK=$(entry skill=fresh-review "timestamp=$FRESH" status=ok "commit=$SHA" \
+# status=clean is the value fr-handoff.sh writes when bucket 1 is empty; a cut is
+# only sound on a clean review of a byte-identical tree.
+FR_OK=$(entry skill=fresh-review "timestamp=$FRESH" status=clean "commit=$SHA" \
               branch=main verdict=clean passes=lattice,cso,codex)
 
+# A drifted tree is tier1, and tier1 cuts nothing — the reviewed artifact is not
+# the one about to land. This is the finding-2 fix: cuts used to fire on tier1
+# whenever the pass had run.
 dirty
 fixture "$FR_OK"
-check "writer-format json, drifted tree" FR_GATE tier1
-check "writer-format json, drifted tree" CUT_TESTING yes
-check "writer-format json, drifted tree" CUT_CODEX_REVIEW yes
-# tier1 keeps the adversarial pass: the tree moved since the review.
-check "writer-format json, drifted tree" CUT_CODEX_ADVERSARIAL no
+check "clean review, drifted tree" FR_GATE tier1
+check "clean review, drifted tree" CUT_TESTING no
+check "clean review, drifted tree" CUT_MAINTAINABILITY no
+check "clean review, drifted tree" CUT_CODEX_REVIEW no
+check "clean review, drifted tree" CUT_CODEX_ADVERSARIAL no
 
+# Identical tree + clean status is the only shape that cuts, and it cuts all four.
 clean_
 fixture "$FR_OK"
-check "writer-format json, identical tree" FR_GATE tier2
-check "writer-format json, identical tree" CUT_CODEX_ADVERSARIAL yes
+check "clean review, identical tree" FR_GATE tier2
+check "clean review, identical tree" FR_STATUS clean
+check "clean review, identical tree" CUT_TESTING yes
+check "clean review, identical tree" CUT_MAINTAINABILITY yes
+check "clean review, identical tree" CUT_CODEX_REVIEW yes
+check "clean review, identical tree" CUT_CODEX_ADVERSARIAL yes
+
+# Identical tree but the review found issues: still tier2, but nothing is cut —
+# ship's specialist must re-check the fix.
+FR_ISSUES=$(entry skill=fresh-review "timestamp=$FRESH" status=issues_found "commit=$SHA" \
+                  branch=main verdict=blocking passes=lattice,cso,codex)
+fixture "$FR_ISSUES"
+check "issues_found, identical tree" FR_GATE tier2
+check "issues_found, identical tree" FR_STATUS issues_found
+check "issues_found, identical tree" CUT_TESTING no
+check "issues_found, identical tree" CUT_CODEX_REVIEW no
+check "issues_found, identical tree" CUT_CODEX_ADVERSARIAL no
+
+# A missing status field is treated as not-clean, never as a green light to cut.
+fixture "$(entry skill=fresh-review "timestamp=$FRESH" "commit=$SHA" passes=lattice,cso,codex)"
+check "no status field, identical tree" FR_GATE tier2
+check "no status field, identical tree" CUT_TESTING no
+check "no status field, identical tree" CUT_CODEX_REVIEW no
 
 # Selection must not depend on serializer spacing in either direction.
-fixture "{\"skill\":\"fresh-review\",\"timestamp\":\"$FRESH\",\"commit\":\"$SHA\",\"passes\":\"lattice,cso,codex\"}"
+fixture "{\"skill\":\"fresh-review\",\"timestamp\":\"$FRESH\",\"status\":\"clean\",\"commit\":\"$SHA\",\"passes\":\"lattice,cso,codex\"}"
 check "compact json" FR_GATE tier2
+check "compact json" CUT_TESTING yes
 
 # --- selection semantics ------------------------------------------------------
-fixture "$(entry skill=review "timestamp=$FRESH" status=ok)" \
-        "$(entry skill=cso "timestamp=$FRESH" status=ok)" \
+fixture "$(entry skill=review "timestamp=$FRESH" status=clean)" \
+        "$(entry skill=cso "timestamp=$FRESH" status=clean)" \
         "$FR_OK"
 check "other skills interleaved" FR_GATE tier2
+check "other skills interleaved" CUT_TESTING yes
 
 fixture "$(entry skill=fresh-review "timestamp=$STALE" "commit=$SHA" passes=lattice)" "$FR_OK"
 check "last fresh-review entry wins" FR_PASSES lattice,cso,codex
 
-# --- cut derivation -----------------------------------------------------------
-fixture "$(entry skill=fresh-review "timestamp=$FRESH" "commit=$SHA" passes=lattice)"
+# --- cut derivation (on a clean, identical tree) ------------------------------
+fixture "$(entry skill=fresh-review "timestamp=$FRESH" status=clean "commit=$SHA" passes=lattice)"
 check "lattice pass only" CUT_TESTING yes
+check "lattice pass only" CUT_MAINTAINABILITY yes
 check "lattice pass only" CUT_CODEX_REVIEW no
 check "lattice pass only" CUT_CODEX_ADVERSARIAL no
 
-fixture "$(entry skill=fresh-review "timestamp=$FRESH" "commit=$SHA" passes=codex)"
+fixture "$(entry skill=fresh-review "timestamp=$FRESH" status=clean "commit=$SHA" passes=codex)"
 check "codex pass only" CUT_TESTING no
 check "codex pass only" CUT_CODEX_REVIEW yes
+check "codex pass only" CUT_CODEX_ADVERSARIAL yes
 
 # --- every failure path must degrade to none ----------------------------------
 fixture "$(entry skill=fresh-review "timestamp=$FRESH" \

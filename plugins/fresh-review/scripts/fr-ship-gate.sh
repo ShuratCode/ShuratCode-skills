@@ -8,13 +8,18 @@
 # Output contract (stdout):
 #   === FRESH-REVIEW SHIP GATE ===
 #   FR_GATE: none | tier1 | tier2
-#   FR_REASON / FR_AGE_H / FR_DRIFT / FR_COMMIT / FR_PASSES
+#   FR_REASON / FR_AGE_H / FR_DRIFT / FR_STATUS / FR_COMMIT / FR_PASSES
 #   CUT_TESTING / CUT_MAINTAINABILITY / CUT_CODEX_REVIEW / CUT_CODEX_ADVERSARIAL: yes | no
 #   === END ===
 #
 # Every failure path resolves to FR_GATE: none — no log, no gstack, unparseable
 # entry, missing `passes` field. "No trim" is the only safe default: it costs
 # duplicated work, while a wrong trim drops a lens from the final gate.
+#
+# Even on a resolved tier, a cut fires only when the prior run's tree is
+# byte-identical to HEAD (tier2) AND its `status` was `clean`. A drifted tree or a
+# review that found issues leaves every cut at `no` — the tier is reported for
+# context, but it never implies a cut on its own.
 
 set -u
 
@@ -57,14 +62,14 @@ for line in sys.stdin:
         last = entry
 
 if last is None:
-    print("no - - -")
+    print("no - - - -")
 else:
     print("yes", last.get("timestamp") or "-", last.get("commit") or "-",
-          last.get("passes") or "-")
+          last.get("passes") or "-", last.get("status") or "-")
 PY
 )
 
-read -r FOUND TS COMMIT PASSES < <("$READER" 2>/dev/null | sed -n '/---CONFIG---/q;p' \
+read -r FOUND TS COMMIT PASSES STATUS < <("$READER" 2>/dev/null | sed -n '/---CONFIG---/q;p' \
   | python3 -c "$SELECT_LAST")
 
 [ "${FOUND:-no}" = "yes" ] || emit_none "no_fresh_review_entry"
@@ -110,17 +115,32 @@ fi
 case ",$PASSES," in *,lattice,*) HAS_LATTICE=yes ;; *) HAS_LATTICE=no ;; esac
 case ",$PASSES," in *,codex,*) HAS_CODEX=yes ;; *) HAS_CODEX=no ;; esac
 
-CUT_TESTING=$HAS_LATTICE
-CUT_MAINTAINABILITY=$HAS_LATTICE
-CUT_CODEX_REVIEW=$HAS_CODEX
+# A cut removes a lens from ship's final gate, so it is only sound when the prior
+# fresh-review both (a) found the code clean for that lens and (b) reviewed the
+# exact tree about to land. `status: issues_found` means our review flagged
+# something ship's specialist must re-check; any drift (tier1) means we reviewed a
+# different artifact. Either alone forbids every cut — a stale `status` field
+# ("-") is treated as not-clean, never as clean.
+SOUND=no
+[ "$STATUS" = "clean" ] && [ "$GATE" = "tier2" ] && SOUND=yes
+
+CUT_TESTING=no
+CUT_MAINTAINABILITY=no
+CUT_CODEX_REVIEW=no
 CUT_CODEX_ADVERSARIAL=no
-[ "$GATE" = "tier2" ] && CUT_CODEX_ADVERSARIAL=$HAS_CODEX
+if [ "$SOUND" = "yes" ]; then
+  CUT_TESTING=$HAS_LATTICE
+  CUT_MAINTAINABILITY=$HAS_LATTICE
+  CUT_CODEX_REVIEW=$HAS_CODEX
+  CUT_CODEX_ADVERSARIAL=$HAS_CODEX
+fi
 
 printf '%s\n' "=== FRESH-REVIEW SHIP GATE ===" \
   "FR_GATE: $GATE" \
   "FR_REASON: $REASON" \
   "FR_AGE_H: $AGE_H" \
   "FR_DRIFT: $DRIFT" \
+  "FR_STATUS: $STATUS" \
   "FR_COMMIT: $COMMIT" \
   "FR_PASSES: $PASSES" \
   "CUT_TESTING: $CUT_TESTING" \

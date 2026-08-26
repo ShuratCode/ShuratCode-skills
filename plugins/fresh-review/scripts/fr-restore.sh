@@ -14,10 +14,13 @@
 #
 # Output contract (stdout):
 #   === FRESH-REVIEW RESTORE ===
-#   RESET: done | skipped_not_committed | skipped_already_reset
-#   INDEX: restored | skipped_nothing_staged | skipped_no_tree
+#   RESET: done | skipped_not_committed | skipped_already_reset | failed
+#   INDEX: restored | skipped_nothing_staged | skipped_no_tree | failed
 #   WORKTREE: removed | skipped_none | failed        (pr-remote mode only)
 #   === END ===
+#
+# Exits non-zero if any undo (RESET, INDEX, or WORKTREE) reported `failed`, so a
+# scripted caller cannot mistake a failed restoration for a clean one.
 
 set -u
 
@@ -26,31 +29,57 @@ STATE="$RUN_DIR/state.env"
 # shellcheck disable=SC1090
 . "$STATE"
 
+# Tolerate an incomplete state file. A run interrupted before fr-checkpoint.sh
+# recorded CHECKPOINT still needs restoring — `git add -A` may already have run —
+# and under `set -u` a bare `$CHECKPOINT` would abort here and strand the index.
+# An empty CHECKPOINT is treated like `failed`: restore the index from the
+# recorded INDEX_TREE, but never reset (that is gated on `committed` alone).
+CHECKPOINT="${CHECKPOINT:-}"
+CHECKPOINT_SHA="${CHECKPOINT_SHA:-}"
+INDEX_TREE="${INDEX_TREE:-}"
+
 RESET=skipped_not_committed
 INDEX=skipped_nothing_staged
+FAILED=0
 
 if [ "$CHECKPOINT" = "committed" ]; then
   if [ "$(git rev-parse HEAD)" = "$CHECKPOINT_SHA" ]; then
-    git reset --soft HEAD~1
-    RESET=done
+    if git reset --soft HEAD~1; then
+      RESET=done
+    else
+      RESET=failed
+      FAILED=1
+    fi
   else
     RESET=skipped_already_reset
   fi
 fi
 
-# Named states rather than `!= skipped`: committed and failed are exactly the two
-# where `git add -A` ran. pr_remote never staged anything, and read-tree there
-# would silently discard anything the user staged while the review was running.
+# committed and failed are exactly the two states where `git add -A` ran. An
+# unrecorded (empty) CHECKPOINT means the run was interrupted before
+# fr-checkpoint.sh persisted anything — restore the index only for a LOCAL run,
+# where fr-checkpoint.sh (the sole stager) could have run. In a pr-remote run
+# PR_REF is set and nothing of ours ever staged, so a read-tree there would
+# silently discard whatever the user staged while the review was running — the
+# same data-losing no-op the by-name gate exists to prevent.
+RESTORE_INDEX=no
 case "$CHECKPOINT" in
-  committed|failed)
-    if [ -n "$INDEX_TREE" ]; then
-      git read-tree "$INDEX_TREE"
+  committed|failed) RESTORE_INDEX=yes ;;
+  "")               [ -z "${PR_REF:-}" ] && RESTORE_INDEX=yes ;;
+esac
+
+if [ "$RESTORE_INDEX" = yes ]; then
+  if [ -n "$INDEX_TREE" ]; then
+    if git read-tree "$INDEX_TREE"; then
       INDEX=restored
     else
-      INDEX=skipped_no_tree
+      INDEX=failed
+      FAILED=1
     fi
-    ;;
-esac
+  else
+    INDEX=skipped_no_tree
+  fi
+fi
 
 printf '%s\n' "=== FRESH-REVIEW RESTORE ===" \
   "RESET: $RESET" \
@@ -69,7 +98,13 @@ if [ -n "${PR_WT:-}" ]; then
   git worktree prune >/dev/null 2>&1 || true
   [ -n "${PR_LOCAL_REF:-}" ] && git update-ref -d "$PR_LOCAL_REF" 2>/dev/null
   echo "WORKTREE: $WORKTREE"
+  [ "$WORKTREE" = failed ] && FAILED=1
 fi
 
 echo "=== END ==="
 git status --short
+
+# A silent `RESET: done` / `INDEX: restored` over a git failure is exactly the
+# data-loss this restore exists to prevent, so a failed undo is both reported in
+# its field and signaled in the exit code for any scripted caller.
+[ "$FAILED" -eq 0 ]

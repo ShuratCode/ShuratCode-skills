@@ -380,7 +380,12 @@ Three things about this pass are deliberate:
 **Pass C — Codex** (background Bash, launched in the same message, not a subagent)
 
 ```bash
-( cd "$SOURCE_ROOT" && codex review --base "$BASE" \
+case "$REVIEW_SCOPE" in
+  pr)      CODEX_SCOPE=(--base "$DIFF_BASE") ;;
+  working) CODEX_SCOPE=(--commit "$CHECKPOINT_SHA") ;;
+  *)       CODEX_SCOPE=(--base "$BASE") ;;
+esac
+( cd "$SOURCE_ROOT" && codex review "${CODEX_SCOPE[@]}" \
     -c sandbox_mode="read-only" -c approval_policy="never" \
     -c 'model_reasoning_effort="high"' \
     < /dev/null > "$RUN_DIR/raw/codex.md" 2> "$RUN_DIR/raw/codex.err"
@@ -392,7 +397,7 @@ Use `run_in_background: true`. Never set a Bash `timeout` on this — a timeout 
 Four things about this invocation are deliberate:
 
 - **`codex review`, not `codex exec`.** `review` scopes natively and emits structured, severity-marked findings that drop into the triage table. `exec` returns prose that would have to be parsed. gstack uses `exec` for its adversarial pass and gates `review` at 200+ lines as its own cost control; that gating does not bind us once Codex is off the critical path.
-- **`--base`, and therefore no custom prompt.** The CLI rejects `[PROMPT]` together with `--base` (`error: the argument '[PROMPT]' cannot be used with '--base <BRANCH>'`), so the isolation contract cannot be injected. `--base` still wins: a separate process running a different model family with no conversation history is the strongest isolation of any pass here, and handing it the base branch avoids spending agentic turns rediscovering the diff. For `REVIEW_SCOPE="working"`, use `--commit "$CHECKPOINT_SHA"` instead. For `REVIEW_SCOPE="pr"`, the `cd "$SOURCE_ROOT"` above is load-bearing and the base must be `--base "$DIFF_BASE"` — a branch *name* there resolves against local refs and would silently diff the PR head against your `main`.
+- **Scope built from `REVIEW_SCOPE`, and therefore no custom prompt.** The CLI rejects `[PROMPT]` together with `--base` (`error: the argument '[PROMPT]' cannot be used with '--base <BRANCH>'`), so the isolation contract cannot be injected. `--base` still wins: a separate process running a different model family with no conversation history is the strongest isolation of any pass here, and handing it the base avoids spending agentic turns rediscovering the diff. The `case` above picks the scope flag per mode, and getting it wrong silently reviews the wrong commit range: `branch` diffs against the base branch (`--base "$BASE"`); `working` has no branch to diff and uses `--commit "$CHECKPOINT_SHA"`; `pr` must use `--base "$DIFF_BASE"` (the merge-base SHA, not `$BASE`) because a branch *name* there resolves against local refs and would silently diff the PR head against your own `main`.
 - **`cd "$SOURCE_ROOT"`.** In review mode this is the repo root and the `cd` is a no-op. In pr-remote it is the only thing pointing Codex at the PR's commit instead of your checkout.
 - **`approval_policy="never"` and `sandbox_mode="read-only"`.** A non-interactive background run that stalls on an approval prompt is indistinguishable from a slow one. Read-only also enforces "do not fix anything" at the process level rather than by instruction.
 - **No `--enable web_search_cached`.** gstack enables it; for a diff review it rarely pays and it adds latency.
