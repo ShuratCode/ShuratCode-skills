@@ -24,28 +24,30 @@ Run it from inside the repo. It reads the newest `fresh-review` entry in the bra
 
 ```
 FR_GATE: none | tier1 | tier2
-FR_REASON / FR_AGE_H / FR_DRIFT / FR_COMMIT / FR_PASSES
+FR_REASON / FR_AGE_H / FR_DRIFT / FR_STATUS / FR_COMMIT / FR_PASSES
 CUT_TESTING / CUT_MAINTAINABILITY / CUT_CODEX_REVIEW / CUT_CODEX_ADVERSARIAL: yes | no
 ```
 
-Act on the four `CUT_*` lines. They already fold in both the tier and which passes actually succeeded, so no further reasoning is needed — and no cut is ever implied by a tier alone.
+Act on the four `CUT_*` lines. They already fold in the tier, the prior run's `status`, and which passes actually succeeded, so no further reasoning is needed — and no cut is ever implied by a tier alone.
 
 | Tier | Condition | Cuts |
 |---|---|---|
 | `none` | no `fresh-review` entry within 24h, or the entry has no `passes` field | nothing |
-| `tier1` | entry ≤24h, but the tree drifted or the checkpoint commit is gone | `testing`, `maintainability`, Codex structured review |
-| `tier2` | entry ≤24h, checkpoint commit alive, zero drift | tier1 + Codex adversarial |
+| `tier1` | entry ≤24h, but the tree drifted or the checkpoint commit is gone | nothing — the reviewed artifact is not the one about to land |
+| `tier2` | entry ≤24h, checkpoint commit alive, zero drift, **and** `status: clean` | `testing`, `maintainability`, Codex structured review, Codex adversarial |
 
-**`tier1` is the common case, and that is correct.** Ship merges the base branch before Step 9, so HEAD usually differs from the fresh-review checkpoint. Do not tune around it: a drifted tree means the reviewed artifact is not the artifact about to land, and the deeper cuts stop being sound.
+**`tier1` is the common case.** Ship merges the base branch before Step 9, so HEAD usually differs from the fresh-review checkpoint. A drifted tree means the reviewed artifact is not the artifact about to land, so no cut is sound — every specialist runs, exactly as if there had been no prior review. A cut only ever happens on `tier2` with a `clean` status: the same tree, reviewed clean, is about to land unchanged.
 
 ## Step 2 — the cuts, and why each is safe
 
+Every cut below is conditioned on `tier2` **and** `FR_STATUS: clean`. A `status: issues_found` run leaves all four at `no` — our review flagged something for that lens, and ship's specialist must re-check the fix rather than be cut.
+
 | ship dispatch | what already covered it | cut at |
 |---|---|---|
-| `testing` specialist (always-on ≥50 lines) | fresh-review Pass A — lattice `test-quality` atom | tier1 |
-| `maintainability` specialist (always-on) | fresh-review Pass A — lattice `clean-code` atom | tier1 |
-| Codex structured review (`sections/adversarial.md`, 200+ lines) | fresh-review Pass C — literally the same `codex review` at `model_reasoning_effort="high"`. Cutting it also removes a 5-minute blocking call and an `AskUserQuestion` P1 gate from the ship path. | tier1 |
-| Codex adversarial `codex exec` (Step 11) | fresh-review Pass C, different framing — adversarial prose vs structured findings. Genuinely a second angle, so it only goes when the tree is provably identical. | tier2 |
+| `testing` specialist (always-on ≥50 lines) | fresh-review Pass A — lattice `test-quality` atom | tier2 + clean |
+| `maintainability` specialist (always-on) | fresh-review Pass A — lattice `clean-code` atom | tier2 + clean |
+| Codex structured review (`sections/adversarial.md`, 200+ lines) | fresh-review Pass C — literally the same `codex review` at `model_reasoning_effort="high"`. Cutting it also removes a 5-minute blocking call and an `AskUserQuestion` P1 gate from the ship path. | tier2 + clean |
+| Codex adversarial `codex exec` (Step 11) | fresh-review Pass C, different framing — adversarial prose vs structured findings. Genuinely a second angle, so it only goes when the tree is provably identical. | tier2 + clean |
 
 Everything else runs. In particular:
 
@@ -64,20 +66,21 @@ Everything else runs. In particular:
 Print the cuts in the same output that would have listed the dispatch, next to ship's own "Dispatching N specialists…" line. Never trim silently.
 
 ```
-FRESH-REVIEW GATE: tier1 (tree drifted 3 paths, review 0.4h old)
+FRESH-REVIEW GATE: tier2 (identical tree, status clean, review 0.4h old)
   cut: testing, maintainability (covered by fresh-review lattice pass)
-  cut: codex structured review (covered by fresh-review codex pass)
-  keeping: security, performance, data-migration, api-contract, red-team, codex adversarial
+  cut: codex structured review, codex adversarial (covered by fresh-review codex pass)
+  keeping: security, performance, data-migration, api-contract, red-team
 ```
 
-On `FR_GATE: none`, print one line naming the reason and dispatch normally.
+A `tier1` gate (drifted tree or vanished checkpoint) and a `tier2` gate whose `status` is `issues_found` both cut nothing — print one line naming the tier and the reason, then dispatch normally. Same for `FR_GATE: none`.
 
 ## Invariants
 
 These are not tuning knobs. Each exists because loosening it converts a duplicated-work saving into a missing lens:
 
 - **Never widen the 24h window.** Older than that and the codebase, the dependencies, or the reviewer's calibration have all moved.
-- **Never accept nonzero drift for `tier2`.** Drift counts committed changes *and* uncommitted ones — any dirty file forces `tier1`. The Codex adversarial pass is the only thing that turns on this, and it is worth re-running whenever the tree is not provably identical.
+- **Never accept nonzero drift for a cut.** Drift counts committed changes *and* uncommitted ones — any dirty file forces `tier1`, and `tier1` cuts nothing. Every cut requires a provably identical tree; the reviewed artifact must be the artifact about to land.
+- **Never cut on `status: issues_found`.** A run that flagged something for a lens has not cleared that lens — ship's specialist must re-check the fix. Only a `clean` run cuts, and a missing/unknown `status` is treated as not-clean.
 - **Never infer a pass ran.** An entry with no `passes` field resolves to `none`, not to a guessed pass list. Old `schema:2` entries lack the field and expire from the window within a day, so this is self-healing.
 - **Verify with git, never with mtimes.** `find -newermt` is unreliable on this machine; `fr-ship-gate.sh` uses `git cat-file`, `git diff --name-only`, and `git status --porcelain` throughout.
 - **A cut is never implied by the tier alone.** `CUT_TESTING` is `yes` only if `lattice` is in `FR_PASSES`; the Codex cuts only if `codex` is. A failed fresh-review pass must not remove ship's coverage for it.

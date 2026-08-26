@@ -106,5 +106,21 @@ UNSTAGED="$(G -C "$WT" diff --name-only | sort | tr '\n' ' ')"
 (cd "$WT" && bash "$SCRIPTS/fr-restore.sh" "$RUN_DIR" > "$TMP/rs2.out" 2>&1)
 want "$TMP/rs2.out" RESET skipped_already_reset "restore is idempotent"
 
+# --- preflight writes a re-sourceable state.env even with a quote in a name ----
+# Every value goes through kv's single-quote escaping. A branch (or repo path)
+# holding a `'` used to unbalance the quoting and break the `.` source in every
+# later script; here the whole file must re-source and BRANCH must round-trip.
+QWT="$TMP/wt-quote"
+git clone -q "$ORIGIN" "$QWT"
+G -C "$QWT" checkout -q -b "wip'quote"
+printf 'x\n' > "$QWT/f.txt"; G -C "$QWT" add -A
+(cd "$QWT" && bash "$SCRIPTS/fr-preflight.sh" > "$TMP/qpf.out" 2>&1)
+QSTATE="$(key "$TMP/qpf.out" STATE)"
+if ( set -eu; . "$QSTATE"; [ "$BRANCH" = "wip'quote" ] ) 2>/dev/null; then
+  ok "state.env re-sources and BRANCH round-trips through a single quote"
+else
+  bad "state.env quoting" "sources with BRANCH=wip'quote" "source failed or BRANCH wrong"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

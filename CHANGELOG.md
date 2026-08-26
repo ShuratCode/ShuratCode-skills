@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.10.1 — 2026-08-26
+
+### `fresh-review` 0.6.0 → 0.6.1: fix six correctness findings from PR review
+
+Human review of the vendored v0.6.0 copy (consumed by another repo) surfaced six defects, all in
+the skill and its `fr-*.sh` scripts. Fixed upstream so consumers re-vendor an already-patched copy.
+
+- **Codex PR-mode base (SKILL.md).** The Pass C `codex review` command hard-coded `--base "$BASE"`.
+  Under `REVIEW_SCOPE="pr"` a branch *name* resolves against local refs and silently diffs the PR
+  head against your own `main`. The scope flag is now built from `REVIEW_SCOPE`: `--base "$DIFF_BASE"`
+  (the merge-base SHA) for PR, `--commit "$CHECKPOINT_SHA"` for working, `--base "$BASE"` for branch.
+- **Ship-gate cuts (`fr-ship-gate.sh`).** The `testing` / `maintainability` / Codex cuts fired
+  whenever the matching pass had run, ignoring drift and the prior run's `status`. A cut removes a
+  lens from ship's final gate, so it now fires only when the reviewed tree is byte-identical to HEAD
+  (`tier2`) **and** the prior `status` was `clean`. `tier1` and `issues_found` cut nothing.
+- **Restore under incomplete state (`fr-checkpoint.sh`, `fr-restore.sh`).** A run that died between
+  `git add -A` and the CHECKPOINT record left the index staged with no way back, and `set -u` aborted
+  the restore on the missing var. The checkpoint now persists a pessimistic marker *before* staging,
+  and restore tolerates a missing CHECKPOINT by recovering the index from the recorded `INDEX_TREE` —
+  but only for a local run (`PR_REF` empty), so an interrupted pr-remote run, where nothing of ours
+  ever staged, is never clobbered by an unnecessary `read-tree`.
+- **Silent restore failures (`fr-restore.sh`).** `git reset --soft` / `git read-tree` failures were
+  ignored while the script still printed `RESET: done` / `INDEX: restored`. Each exit status is now
+  checked, reported as `failed` in its field, and reflected in a non-zero exit code.
+- **Leaked PR worktree (`fr-pr-resolve.sh`).** A `git worktree add` that registered the entry but
+  failed at checkout left a directory `git worktree prune` could not reap, and its path was never
+  persisted for restore. It is now force-removed (entry + directory) before returning `unresolved`.
+- **Unescaped state values (`fr-preflight.sh`, `fr-pr-resolve.sh`).** `state.env` values were
+  single-quoted without escaping, so a `'` in a repo path or branch name broke every later `source`.
+  Every value in both writers now goes through the `kv` quote-escaping helper — including
+  fr-pr-resolve.sh's bulk block (`SOURCE_ROOT`, `PR_WT`, `PR_BASE_NAME`), which the review flagged as
+  the same latent class.
+- **Tests.** `test-ship-gate.sh` updated for the drift/status conditioning; new `test-restore-recovery.sh`
+  covers the incomplete-state and read-tree-failure paths; `test-review-mode.sh` pins the state.env
+  quoting round-trip.
+
 ## 0.10.0 — 2026-08-26
 
 ### `fresh-review` 0.5.0 → 0.6.0: generate a pinned, vendored copy for consumer repos
