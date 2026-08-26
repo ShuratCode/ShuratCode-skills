@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.0 — 2026-08-26
+
+### `vault-tools` 0.4.0 → 0.5.0: add the `vault-route` skill (clear the mobile inbox)
+
+Shaked captures on his phone with the Obsidian Web Clipper, which can only write into `00 Inbox/`.
+Web-clipped articles piled up there — mixed with the odd hand-typed note — with nothing to route
+them into the reading pipeline. The RSS Dashboard and desktop Web Clipper already save straight into
+`Reading/Inbox`; this gap was specifically the mobile path.
+
+**New skill `vault-route`** (`/vault-tools:route`, natural-language "route the inbox"). Sweeps
+`00 Inbox/`, classifies each note, normalises article clips into `Reading/Inbox` reading notes with
+correct frontmatter (extracting source/author/published where the clip carries them, blank rather
+than guessed), sends high-confidence known types (meetings → Meetings, recipes → Recipes) to their
+PARA folder, and leaves anything ambiguous in place with a report line. Default mode is
+propose-the-routing-table-then-move — nothing is relocated before Shaked confirms the batch. It
+routes and normalises only; it never ingests, never sets a verdict, and never deletes. Shipped with a
+`commands/route.md` desktop wrapper, matching the sibling skills.
+
+**Schema first.** Routing moves files between folders, which the vault's `AGENTS.md` guardrail 7
+forbade. Before building the skill, `AGENTS.md` was amended (with Shaked's sign-off) to add a fourth
+operation, "Route", relax guardrail 7 to permit `00 Inbox/` → destination moves, and add those moves
+to Permissions → Allowed. The raw-layer and never-delete guardrails were left untouched — routing
+moves working-area captures only and never touches `Reading/Archive`, `Books/`, `Podcasts/`, or
+`rss-dashboard-data/`. The human-facing `HOWTO — Working With the Vault.md` was updated to match.
+
 ## 0.10.0 — 2026-08-26
 
 ### `fresh-review` 0.5.0 → 0.6.0: generate a pinned, vendored copy for consumer repos
