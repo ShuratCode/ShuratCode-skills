@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "worktree-cleanup",
+  "version": "0.1.0",
+  "description": "Safely clean up git worktrees: dry-run classification, then delete only user-approved ones, never those with uncommitted changes or unpublished commits.",
+  "author": {
+    "name": "Shaked Eyal",
+    "url": "https://github.com/ShuratCode"
+  },
+  "homepage": "https://github.com/ShuratCode/ShuratCode-skills",
+  "repository": "https://github.com/ShuratCode/ShuratCode-skills",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "worktree",
+    "cleanup",
+    "prune",
+    "maintenance"
+  ]
+}

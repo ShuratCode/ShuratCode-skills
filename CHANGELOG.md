@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.13.0 — 2026-09-03
+
+### New plugin: `worktree-cleanup` 0.1.0
+
+Safely tidy git worktrees. One bash driver
+(`plugins/worktree-cleanup/scripts/worktree-cleanup.sh`) classifies every linked worktree and, by
+default, deletes nothing.
+
+- **Dry run first.** With no `--remove`, it prints a `REMOVE` / `KEEP` / `PRUNABLE` verdict per
+  worktree. A worktree is kept whenever it has uncommitted changes (modified *or* untracked files,
+  seen even under `status.showUntrackedFiles=no`), commits not reachable from any remote-tracking
+  branch, gitignored local files (a `.env`, a build cache), or a lock. "Unpublished" is measured as
+  `git rev-list --count <HEAD> --not --remotes`, so a detached HEAD already merged to a remote under
+  another name still reads as safe; a repo with no remote keeps everything.
+- **Removal is opt-in and per-path.** `--remove PATH` (repeatable) deletes only the exact paths
+  named, re-classifying each first (against the same canonical path git then acts on) and refusing
+  any that are not safe. `--force` is the only way past a `KEEP` — it discards that named worktree
+  and forwards the second force a lock needs — and never removes the primary worktree. `--prune`
+  clears stale entries for directories already gone, and its failure surfaces in the exit code.
+- **Hardened against data loss.** Inherited `GIT_*` routing is dropped so a status read can't be
+  aimed at a different index than the delete; the check is measured against local remote-tracking
+  refs, so `git fetch` first when that matters (the dry run says so). Ships a 41-assertion regression
+  suite covering every verdict and refusal path.
+- **`everything` 0.3.0 → 0.4.0** now depends on `worktree-cleanup`.
+
 ## 0.12.0 — 2026-08-26
 
 ### `fresh-review` 0.6.1 → 0.7.0: Codex is opt-in
