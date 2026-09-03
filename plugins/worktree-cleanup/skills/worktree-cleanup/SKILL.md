@@ -118,12 +118,15 @@ State these to the user when they hesitate — they are guarantees of the script
 - **Untracked work is always seen**, regardless of your `status.showUntrackedFiles`
   config. The dirty check forces `--untracked-files=all`, so a worktree holding
   only untracked files is `KEEP`, never silently removed under a `no` setting.
-- **Gitignored local files are the one thing a plain `--remove` discards.** A
-  `.env`, a build cache, or `node_modules` is not a tracked change, so a worktree
-  carrying only ignored files is still a `REMOVE` candidate — a cleanup tool has to
-  be able to drop them. The dry-run reason says `has ignored local files … --remove
-  discards them` so the choice is yours, not a surprise. Move a `.env` you care
-  about out first.
+- **Gitignored local files force a `KEEP`.** A `.env`, a local database, or a build
+  cache is not a tracked change, so git calls the tree clean — but those files are
+  backed up nowhere, so a worktree carrying them is kept with reason `has ignored
+  local files (e.g. .env/build); --force to discard`. Because `--remove` only ever
+  touches the paths you name, `--force --remove <that path>` drops exactly that one
+  worktree (handy for a stale `node_modules` checkout) without endangering any other.
+- **Locked worktrees are a `KEEP` too, and `--force` removes them** — the script
+  passes git the second `--force` a lock requires, so you never have to unlock by
+  hand first.
 
 ## Gotchas
 
@@ -160,6 +163,18 @@ State these to the user when they hesitate — they are guarantees of the script
 - **The primary worktree is filtered by physical path**, resolved with `pwd -P`,
   so a symlinked or `~`-relative `--repo` still matches and is never offered for
   deletion.
+- **Inherited `GIT_*` routing is dropped at startup.** `GIT_DIR`, `GIT_WORK_TREE`,
+  `GIT_INDEX_FILE`, `GIT_COMMON_DIR`, and `GIT_OBJECT_DIRECTORY` are unset before any
+  git call, so a status read can't be pointed at a different index than the worktree
+  being deleted. Target a repo with `--repo`, never by exporting `GIT_DIR`.
+- **`assume-unchanged` / `skip-worktree` can hide a modified tracked file.** Those
+  index bits tell git to ignore a file's changes, so a worktree edited only through
+  such a file reads clean and is removable. That is a deliberate power-user setting;
+  if you use it, clear it before cleaning up (`git update-index --no-assume-unchanged`).
+- **A worktree path containing a newline, tab, or quote is not parsed.** git quotes
+  such paths in `--porcelain`, which the plain-text `sed`/`awk` matching does not
+  decode. Ordinary paths (including spaces) are fine; pathological ones are simply
+  never matched, so they are left alone rather than mis-targeted.
 - **Written for bash 3.2** (macOS `/bin/bash`): no associative arrays, no
   `mapfile`. The porcelain block for one worktree is pulled with an `awk`
   paragraph-mode match on the exact `worktree <path>` line.

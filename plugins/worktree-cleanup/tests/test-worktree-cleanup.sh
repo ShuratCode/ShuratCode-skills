@@ -14,7 +14,11 @@ S="$HERE/../scripts/worktree-cleanup.sh"
 [ -f "$S" ] || { echo "cannot find worktree-cleanup.sh next to $HERE"; exit 2; }
 
 PASS=0; FAIL=0
-TMP="$(mktemp -d)"
+# Guard hard: without a real temp dir, TMP="" makes every fixture path "/repo…",
+# and a setup subshell that fails to cd there would run git init/commit/worktree
+# in the caller's own checkout. Refuse to continue.
+TMP="$(mktemp -d)" || { echo "mktemp -d failed"; exit 2; }
+case "$TMP" in /*/*) ;; *) echo "refusing to run: temp dir looks unsafe: '$TMP'"; exit 2 ;; esac
 trap 'rm -rf "$TMP"' EXIT
 
 GA=(-c user.email=t@t -c user.name=t -c commit.gpgsign=false)
@@ -161,14 +165,25 @@ grep_ok  "untracked-only under -uno -> KEEP dirty" 'KEEP +wts/uwork +dirty' --re
 bash "$S" --repo "$UC" --remove "$UC/wts/uwork" >/dev/null 2>&1
 if [ -f "$UC/wts/uwork/precious.txt" ]; then ok "untracked work survived under -uno"; else bad "untracked work deleted under -uno"; fi
 
-# 18. a clean worktree carrying gitignored local files is flagged, not silently "clean"
+# 18. a clean worktree carrying gitignored local files is KEPT (require --force),
+#     never silently deleted; --force still removes it per named path.
 IG="$TMP/ignored"; RIG="$IG-remote.git"; rm -rf "$IG" "$RIG"
 git init -q --bare "$RIG"; git init -q "$IG"
-( cd "$IG"; printf '.env\n' > .gitignore; git add .gitignore
+( cd "$IG"; printf '.env*\n' > .gitignore; git add .gitignore   # committed first, so worktrees inherit it
   git "${GA[@]}" commit -q -m init; git branch -M main
   git remote add origin "$RIG"; git push -q -u origin main
-  git worktree add -q wts/env HEAD; echo SECRET=x > wts/env/.env )
-grep_ok  "ignored local files flagged on REMOVE" 'REMOVE +wts/env +.*ignored local files' --repo "$IG"
+  git worktree add -q wts/env HEAD; echo SECRET=x > wts/env/.env
+  git worktree add -q wts/many HEAD; for i in $(seq 1 400); do echo "x$i=y" > "wts/many/.env$i"; done )
+grep_ok  "ignored local files -> KEEP (force to discard)" 'KEEP +wts/env +.*ignored local files' --repo "$IG"
+grep_ok  "many ignored files still KEEP (no SIGPIPE flip)" 'KEEP +wts/many +.*ignored local files' --repo "$IG"
+grep_ok  "ignored worktree refused without --force" 'REFUSED.*wts/env'   --repo "$IG" --remove "$IG/wts/env"
+if [ -f "$IG/wts/env/.env" ]; then ok "ignored .env survived a plain --remove"; else bad "ignored .env deleted without --force"; fi
+grep_ok  "ignored worktree removed with --force" 'FORCED.*wts/env'       --repo "$IG" --remove "$IG/wts/env" --force
+
+# 19. a flag-shaped value after --remove is rejected, not swallowed as a path
+if ( bash "$S" --repo "$IG" --remove --force </dev/null >/dev/null 2>&1 ); then
+  bad "--remove --force should exit 2"; else
+  rc=$?; [ "$rc" -eq 2 ] && ok "--remove <flag> rejected (exit 2)" || bad "--remove <flag> exit was $rc"; fi
 
 echo
 if [ "$FAIL" -gt 0 ]; then
