@@ -19,8 +19,9 @@ format. Chat is the odd one out: it has no marketplace and takes zip uploads onl
 | **fresh-review** | Pre-commit review with enforced producer/reviewer context separation. Runs the lattice review, the gstack review, and the gstack security audit against the current diff via context-isolated subagents, then triages findings back where intent is known. | `lattice` (auto-installed), gstack (manual) |
 | **upgrade-all** | One-shot local maintenance: Homebrew formulas + casks + cleanup, gstack upgrade with migrations, and `claude plugins update` for lattice / aws-core / sparkpilot. Prints one summary block instead of streaming every command. | Homebrew, gstack, `claude` CLI — all optional, each degrades to `SKIPPED` |
 | **pull-all** | Point it at a directory; it finds every git repo underneath and fast-forwards each one's main branch from origin, in parallel. Never switches branches, never merges non-fast-forward, never touches a dirty tree. Reports one worst-first line per repo. | git |
+| **worktree-cleanup** | Classifies the linked worktrees of a repo and, once you approve them, removes only the ones that are safe — never a worktree with uncommitted changes, unpublished commits, gitignored local files, or a lock, and never the primary. Dry-run by default. | git |
 | **restaurant-search** | Finds restaurants through three gates — in the right area, verifiably open at the target time in the *restaurant's* timezone, and with a menu that verifiably contains a qualifying dish. Never fills gaps with plausible guesses. | nothing |
-| **everything** | Meta-plugin with no skills of its own. Installing it pulls in all four. | — |
+| **everything** | Meta-plugin with no skills of its own. Installing it pulls in every other plugin. | — |
 
 ## Install — Claude Code
 
