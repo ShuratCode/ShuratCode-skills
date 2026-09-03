@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.13.0 — 2026-09-03
+
+### New plugin: `worktree-cleanup` 0.1.0
+
+Safely tidy git worktrees. One bash driver
+(`plugins/worktree-cleanup/scripts/worktree-cleanup.sh`) classifies every linked worktree and, by
+default, deletes nothing.
+
+- **Dry run first.** With no `--remove`, it prints a `REMOVE` / `KEEP` / `PRUNABLE` verdict per
+  worktree. A worktree is kept whenever it has uncommitted changes (modified *or* untracked files),
+  commits not reachable from any remote-tracking branch, or a lock. "Unpublished" is measured as
+  `git rev-list --count <HEAD> --not --remotes`, so a detached HEAD already merged to a remote under
+  another name still reads as safe; a repo with no remote keeps everything.
+- **Removal is opt-in and per-path.** `--remove PATH` (repeatable) deletes only the exact paths
+  named, re-classifying each first and refusing any that turned dirty or unpublished. `--force` is
+  the only way past a `KEEP`, and never removes the primary worktree. `--prune` clears stale entries
+  for directories already gone from disk.
+- **`everything` 0.3.0 → 0.4.0** now depends on `worktree-cleanup`.
+
 ## 0.12.0 — 2026-08-26
 
 ### `fresh-review` 0.6.1 → 0.7.0: Codex is opt-in

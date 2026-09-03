@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "ShuratCode-skills",
   "description": "Shaked Eyal's personal skills for Claude Code and Claude Desktop (Cowork).",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "owner": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"
@@ -80,6 +80,19 @@
         "notes",
         "books",
         "podcasts"
+      ]
+    },
+    {
+      "name": "worktree-cleanup",
+      "source": "./plugins/worktree-cleanup",
+      "description": "Safely clean up git worktrees: dry-run classification, then delete only user-approved ones, never those with uncommitted changes or unpublished commits.",
+      "category": "maintenance",
+      "keywords": [
+        "git",
+        "worktree",
+        "cleanup",
+        "prune",
+        "maintenance"
       ]
     },
     {
