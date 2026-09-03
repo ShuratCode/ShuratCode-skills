@@ -124,6 +124,18 @@ if ( bash "$S" --bogus >/dev/null 2>&1 ); then bad "unknown flag should exit 2";
 if ( bash "$S" --repo "$TMP" >/dev/null 2>&1 ); then bad "non-repo should exit 2"; else
   rc=$?; [ "$rc" -eq 2 ] && ok "non-repo dir exits 2" || bad "non-repo exit was $rc"; fi
 
+# 13. a locked worktree is kept even though it is clean+published, and refused for removal
+LK="$TMP/locked"
+mkfixture "$LK"
+git -C "$LK" worktree lock wts/clean --reason "in use by a test"
+grep_ok  "locked overrides clean -> KEEP locked" 'KEEP +wts/clean +locked' --repo "$LK"
+grep_ok  "locked worktree refused in remove"     'REFUSED.*wts/clean'  --repo "$LK" --remove "$LK/wts/clean"
+if git -C "$LK" worktree list | grep -q 'wts/clean'; then ok "locked worktree still present"; else bad "locked worktree was removed"; fi
+
+# 14. remove mode on a prunable path is SKIPPED and points at --prune (not a silent failure)
+rm -rf "$LK/wts/dirty"
+grep_ok  "remove-mode prunable -> SKIPPED use --prune" 'SKIPPED.*use .*--prune' --repo "$LK" --remove "$LK/wts/dirty"
+
 echo
 if [ "$FAIL" -gt 0 ]; then
   printf '\033[31m%d passed, %d failed.\033[0m\n' "$PASS" "$FAIL"

@@ -69,7 +69,11 @@ canon() {
   # the (repo-relative) dry-run table removes correctly from any working directory.
   local p="${1/#\~/$HOME}"
   case "$p" in /*) ;; *) p="$REPO/$p" ;; esac
-  if [ -d "$p" ]; then ( cd "$p" && pwd -P ); else echo "$p"; fi
+  if [ -d "$p" ]; then ( cd "$p" && pwd -P ); return; fi
+  # the leaf is gone (a prunable worktree) — resolve the existing parent through
+  # symlinks and re-append the leaf, so it still matches git's -P stored path.
+  local d b; d="$(dirname "$p")"; b="$(basename "$p")"
+  if [ -d "$d" ]; then ( cd "$d" && printf '%s/%s\n' "$(pwd -P)" "$b" ); else echo "$p"; fi
 }
 PRIMARY="$(canon "$PRIMARY")"
 
