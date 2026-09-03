@@ -136,6 +136,40 @@ if git -C "$LK" worktree list | grep -q 'wts/clean'; then ok "locked worktree st
 rm -rf "$LK/wts/dirty"
 grep_ok  "remove-mode prunable -> SKIPPED use --prune" 'SKIPPED.*use .*--prune' --repo "$LK" --remove "$LK/wts/dirty"
 
+# 15. exit-code contract: a refusal exits 1, a full success exits 0 (automation depends on this)
+EC="$TMP/exitcode"; mkfixture "$EC"
+bash "$S" --repo "$EC" --remove "$EC/wts/dirty" >/dev/null 2>&1
+[ $? -eq 1 ] && ok "refused removal exits 1" || bad "refused removal did not exit 1"
+bash "$S" --repo "$EC" --remove "$EC/wts/clean" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "approved removal exits 0" || bad "approved removal did not exit 0"
+
+# 16. mixed batch: approved removed, unsafe refused, whole call exits 1
+BATCH="$TMP/batch"; mkfixture "$BATCH"
+out="$(bash "$S" --repo "$BATCH" --remove "$BATCH/wts/clean" --remove "$BATCH/wts/dirty" 2>&1)"; rc=$?
+printf '%s\n' "$out" | grep -q 'REMOVED.*wts/clean' && printf '%s\n' "$out" | grep -q 'REFUSED.*wts/dirty' \
+  && ok "mixed batch removes approved and refuses unsafe" || { bad "mixed batch wrong:"; printf '%s\n' "$out" | sed 's/^/      /'; }
+git -C "$BATCH" worktree list | grep -q 'wts/clean' && bad "batch: approved not removed" || ok "batch: approved removed"
+git -C "$BATCH" worktree list | grep -q 'wts/dirty' && ok "batch: unsafe kept" || bad "batch: unsafe deleted"
+[ "$rc" -eq 1 ] && ok "batch with one refusal exits 1" || bad "batch exit was $rc, want 1"
+
+# 17. status.showUntrackedFiles=no must not hide untracked work (data-loss regression)
+UC="$TMP/uconfig"; mkfixture "$UC"
+git -C "$UC" config status.showUntrackedFiles no
+git -C "$UC" worktree add -q wts/uwork HEAD
+echo secret > "$UC/wts/uwork/precious.txt"     # untracked, only visible with -uall
+grep_ok  "untracked-only under -uno -> KEEP dirty" 'KEEP +wts/uwork +dirty' --repo "$UC"
+bash "$S" --repo "$UC" --remove "$UC/wts/uwork" >/dev/null 2>&1
+if [ -f "$UC/wts/uwork/precious.txt" ]; then ok "untracked work survived under -uno"; else bad "untracked work deleted under -uno"; fi
+
+# 18. a clean worktree carrying gitignored local files is flagged, not silently "clean"
+IG="$TMP/ignored"; RIG="$IG-remote.git"; rm -rf "$IG" "$RIG"
+git init -q --bare "$RIG"; git init -q "$IG"
+( cd "$IG"; printf '.env\n' > .gitignore; git add .gitignore
+  git "${GA[@]}" commit -q -m init; git branch -M main
+  git remote add origin "$RIG"; git push -q -u origin main
+  git worktree add -q wts/env HEAD; echo SECRET=x > wts/env/.env )
+grep_ok  "ignored local files flagged on REMOVE" 'REMOVE +wts/env +.*ignored local files' --repo "$IG"
+
 echo
 if [ "$FAIL" -gt 0 ]; then
   printf '\033[31m%d passed, %d failed.\033[0m\n' "$PASS" "$FAIL"

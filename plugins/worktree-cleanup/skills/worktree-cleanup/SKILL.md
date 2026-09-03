@@ -115,6 +115,15 @@ State these to the user when they hesitate — they are guarantees of the script
   rewound on the real remote but your stale `refs/remotes/…` still points at those
   commits, they read as published and become a `REMOVE` candidate. Run
   `git fetch --prune` first when that gap matters; the dry-run output says this too.
+- **Untracked work is always seen**, regardless of your `status.showUntrackedFiles`
+  config. The dirty check forces `--untracked-files=all`, so a worktree holding
+  only untracked files is `KEEP`, never silently removed under a `no` setting.
+- **Gitignored local files are the one thing a plain `--remove` discards.** A
+  `.env`, a build cache, or `node_modules` is not a tracked change, so a worktree
+  carrying only ignored files is still a `REMOVE` candidate — a cleanup tool has to
+  be able to drop them. The dry-run reason says `has ignored local files … --remove
+  discards them` so the choice is yours, not a surprise. Move a `.env` you care
+  about out first.
 
 ## Gotchas
 
@@ -134,11 +143,16 @@ State these to the user when they hesitate — they are guarantees of the script
   then reads `clean, fully published` even though the work is no longer on the
   remote. `git fetch --prune` before the dry run closes the window; the tool never
   fetches on its own because a cleanup command should have no network side effects.
-- **Untracked files count as "dirty".** A worktree that is clean on tracked files
-  but has an untracked scratch file is `KEEP`, because `git worktree remove`
-  itself refuses to delete it without `--force` and the file is unrecoverable
-  work. Verified: an untracked-only worktree classifies `KEEP  dirty (1
-  uncommitted)`.
+  The same "only as fresh as the last fetch" caveat, plus a shallow clone or grafts
+  altering reachability, is the one narrow case where a detached-HEAD worktree's
+  commits could be miscounted — `git fetch` and a full (non-shallow) clone remove it.
+- **Untracked files count as "dirty" — and the check ignores your git config.**
+  A worktree clean on tracked files but holding an untracked scratch file is
+  `KEEP`. The status probe forces `--untracked-files=all`, so this holds even
+  when the repo or global config sets `status.showUntrackedFiles=no` — without
+  that flag both the check *and* `git worktree remove` would honor the config and
+  silently drop the file. Verified: an untracked-only worktree under `-uno` still
+  classifies `KEEP  dirty` and is refused.
 - **A deleted worktree directory becomes `PRUNABLE`, not `REMOVE`.** Once the
   directory is gone from disk, `git worktree remove` errors with "gitdir file
   points to non-existent location"; the fix is `--prune`, which the `--remove`

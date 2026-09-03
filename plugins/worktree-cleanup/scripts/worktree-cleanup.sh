@@ -95,7 +95,11 @@ classify() {
   fi
   if [ "$target" = "$PRIMARY" ]; then printf 'KEEP\tprimary worktree\n'; return; fi
 
-  local st; st="$(git -C "$target" status --porcelain 2>/dev/null)"; local rc=$?
+  # --untracked-files=all overrides a repo/global status.showUntrackedFiles=no,
+  # under which an untracked-only worktree would otherwise read clean — and
+  # `git worktree remove` honors that same config, so it would delete real work
+  # with no --force. Never trust the user's status config for a deletion gate.
+  local st; st="$(git -C "$target" status --porcelain --untracked-files=all 2>/dev/null)"; local rc=$?
   if [ $rc -ne 0 ]; then printf 'KEEP\tcannot read status — leaving it\n'; return; fi
   if [ -n "$st" ]; then
     local n; n="$(printf '%s\n' "$st" | grep -c .)"
@@ -110,8 +114,23 @@ classify() {
   if [ -z "$ahead" ]; then printf 'KEEP\tcould not compare to remotes\n'; return; fi
   if [ "$ahead" -gt 0 ]; then printf 'KEEP\t%s unpublished commit(s)\n' "$ahead"; return; fi
 
+  # Removable — but gitignored working files (a local .env, build caches) are not
+  # backed up anywhere and `git worktree remove` deletes them. Still a REMOVE
+  # candidate (a cleanup tool must be able to drop node_modules worktrees), but
+  # flagged so the dry run gives the user an informed choice instead of a silent loss.
+  # Tracked and untracked are already clean here, so any '!!' line is an ignored
+  # working file. (git rejects --ignored with --untracked-files=no, so ask for
+  # all and filter.)
+  if git -C "$target" status --porcelain --ignored=matching --untracked-files=all 2>/dev/null | grep -q '^!!'; then
+    printf 'REMOVE\tclean, published — has ignored local files (e.g. .env/build); --remove discards them\n'; return
+  fi
   printf 'REMOVE\tclean, fully published\n'
 }
+
+# classify() returns "VERDICT<TAB>REASON"; both loops decode it through here so
+# the contract lives in one place. Sets the globals V and R.
+split_vr() { V="${1%%$'\t'*}"; R="${1#*$'\t'}"; }
+ROW_FMT='%-9s  %-45s  %s\n'   # header and every row share these column widths
 
 if [ "$MODE" = "report" ]; then
   echo "=== WORKTREE-CLEANUP (dry run — nothing deleted) ==="
@@ -119,10 +138,10 @@ if [ "$MODE" = "report" ]; then
   shown=0
   while IFS= read -r wt; do
     [ "$(canon "$wt")" = "$PRIMARY" ] && continue
-    if [ "$shown" -eq 0 ]; then printf '%-9s  %-45s  %s\n' VERDICT PATH REASON; shown=1; fi
-    out="$(classify "$wt")"; v="${out%%$'\t'*}"; r="${out#*$'\t'}"
+    if [ "$shown" -eq 0 ]; then printf "$ROW_FMT" VERDICT PATH REASON; shown=1; fi
+    split_vr "$(classify "$wt")"
     rel="${wt#"$PRIMARY"/}"
-    printf '%-9s  %-45s  %s\n' "$v" "$rel" "$r"
+    printf "$ROW_FMT" "$V" "$rel" "$R"
   done < <(git -C "$REPO" worktree list --porcelain | sed -n 's/^worktree //p')
   [ "$shown" -eq 0 ] && echo "(no linked worktrees — only the primary one exists)"
   [ "$PRUNE" -eq 1 ] && { echo "--- pruning missing worktree entries ---"; git -C "$REPO" worktree prune -v; }
@@ -139,8 +158,8 @@ for path in "${REMOVE[@]}"; do
   if [ "$(canon "$path")" = "$PRIMARY" ]; then
     echo "REFUSED   $path — primary worktree, never removable (not even with --force)"; rc_all=1; continue
   fi
-  out="$(classify "$path")"; v="${out%%$'\t'*}"; r="${out#*$'\t'}"
-  case "$v" in
+  split_vr "$(classify "$path")"
+  case "$V" in
     REMOVE)
       if git -C "$REPO" worktree remove "$path" 2>"$ERR"; then
         echo "REMOVED   $path"
@@ -149,20 +168,20 @@ for path in "${REMOVE[@]}"; do
       fi
       ;;
     PRUNABLE)
-      echo "SKIPPED   $path — $r (use --prune to clear the stale entry)"; rc_all=1
+      echo "SKIPPED   $path — $R (use --prune to clear the stale entry)"; rc_all=1
       ;;
     UNKNOWN)
-      echo "SKIPPED   $path — $r"; rc_all=1
+      echo "SKIPPED   $path — $R"; rc_all=1
       ;;
     KEEP)
       if [ "$FORCE" -eq 1 ]; then
         if git -C "$REPO" worktree remove --force "$path" 2>"$ERR"; then
-          echo "FORCED    $path — was: $r"
+          echo "FORCED    $path — was: $R"
         else
           echo "FAILED    $path — $(cat "$ERR")"; rc_all=1
         fi
       else
-        echo "REFUSED   $path — $r (pass --force only if you accept losing it)"; rc_all=1
+        echo "REFUSED   $path — $R (pass --force only if you accept losing it)"; rc_all=1
       fi
       ;;
   esac
