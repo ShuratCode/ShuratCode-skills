@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.14.0 — 2026-09-07
+
+### `fresh-review` 0.7.0 → 0.8.0: pr-remote runs the gstack `/review` army
+
+Fresh-review deliberately leaves gstack `/review`'s structural specialists (`performance`,
+`data-migration`, `api-contract`, Red Team) to `/ship` Step 9 — the reasoning being that you run
+`/ship` on the diff you land, so running `/review` here too double-bills the same army. That reasoning
+is author-centric and breaks in **pr-remote** mode (reviewing someone else's PR by number or URL):
+you are not the author and you never ship that branch, so no `/ship` of yours ever runs those
+specialists on it. Without a fix they reviewed the PR *never*, not twice.
+
+- **New Pass R — the review army, pr-remote only.** When `CHECKPOINT: pr_remote` and `HAS_GSTACK: 1`,
+  Step 5 launches a fourth subagent that runs gstack `/review` **report-only** against the PR head in
+  `SOURCE_ROOT`: its critical pass, Review Army specialists, quality score, and adversarial/Red Team
+  pass, with Step 5 Fix-First and Step 5.8 persist overridden off so nothing is fixed, asked, or
+  logged. Findings merge into triage tagged `review`.
+- **Verdict is honest about coverage.** The pr-remote `not covered here` line now states the
+  structural specialists were *covered here by Pass R* — or, when `HAS_GSTACK: 0`, that they are
+  genuinely unowned because no ship of yours will run them either. The pass line gains a pr-remote
+  `review ✓n | ✗` field.
+- **Run log `schema:6`** adds an optional `review` pass, present only on pr-remote runs with gstack,
+  disambiguated from the historical `schema:2` `gstack` pass.
+- No script changes: `SOURCE_ROOT`, `HAS_GSTACK`, and the `pr_remote` mutation-check branch already
+  existed. SKILL.md only.
+
 ## 0.13.0 — 2026-09-03
 
 ### New plugin: `worktree-cleanup` 0.1.0
