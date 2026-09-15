@@ -16,6 +16,7 @@
 #   === FRESH-REVIEW PREFLIGHT ===
 #   STATUS: ok | stop
 #   STOP_REASON: <slug>            (only when STATUS: stop)
+#   PLUGIN_ROOT                    (the running copy's root, also in state.env)
 #   RUN_DIR / STATE / MODE / PR_REF / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE
 #   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / CODEX_CFG / GSTACK_BIN
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_CMD
@@ -43,6 +44,13 @@ case "$MODE" in
   review|pr) : ;;
   *) echo "fr-preflight: --mode must be review or pr, got '$MODE'" >&2; exit 2 ;;
 esac
+
+# The plugin root of the copy that is actually running, resolved from this
+# script's own location rather than from an ambient CLAUDE_PLUGIN_ROOT the
+# skill body cannot rely on. Recorded in state.env so every later script call
+# restores it by sourcing state.env — the orchestrator only has to resolve the
+# root once, for this bootstrap call (SKILL.md Step 0). Same shape as vendor.sh.
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   emit "=== FRESH-REVIEW PREFLIGHT ==="
@@ -139,6 +147,7 @@ STATE="$RUN_DIR/state.env"
 # redirect rather than appended.
 kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
 {
+  kv CLAUDE_PLUGIN_ROOT "$PLUGIN_ROOT"
   kv REPO_ROOT "$REPO_ROOT"
   kv SOURCE_ROOT "$REPO_ROOT"
   kv MODE "$MODE"
@@ -167,6 +176,7 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
 
 emit "=== FRESH-REVIEW PREFLIGHT ==="
 emit "STATUS: ok"
+emit "PLUGIN_ROOT: $PLUGIN_ROOT"
 emit "RUN_DIR: $RUN_DIR"
 emit "STATE: $STATE"
 emit "MODE: $MODE"

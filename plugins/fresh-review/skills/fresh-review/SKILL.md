@@ -158,6 +158,35 @@ Steps run in order. Step 5 is one parallel fan-out; everything else is sequentia
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
+<!-- FR:BOOTSTRAP:START -->
+### Step 0: Resolve the plugin root (bootstrap)
+
+Every script below is addressed as `${CLAUDE_PLUGIN_ROOT}/scripts/…`. Claude Code exports that variable into a plugin's own commands and hooks, but **not** into the ad-hoc Bash-tool shell this skill body drives once the Skill tool has loaded — and each Bash-tool call is a fresh shell that inherits nothing from the previous one. So it is routinely empty here, and an empty value collapses every call to `bash "/scripts/fr-*.sh"`, which fails. Resolve it once, now, and do not assume it survives into the next call.
+
+Run this before Step 1. It keeps an ambient value when Claude Code did provide one, and otherwise locates the installed plugin deterministically:
+
+```bash
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$CLAUDE_PLUGIN_ROOT" ] || [ ! -f "$CLAUDE_PLUGIN_ROOT/scripts/fr-preflight.sh" ]; then
+  for c in \
+      "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/fresh-review" \
+      "$HOME/.claude/plugins/marketplaces/ShuratCode-skills/plugins/fresh-review" \
+      $(ls -d "$HOME"/.claude/plugins/cache/ShuratCode-skills/fresh-review/*/ 2>/dev/null | sort -Vr); do
+    [ -f "$c/scripts/fr-preflight.sh" ] && CLAUDE_PLUGIN_ROOT="$(cd "$c" && pwd)" && break
+  done
+fi
+[ -f "$CLAUDE_PLUGIN_ROOT/scripts/fr-preflight.sh" ] \
+  && echo "FR_PLUGIN_ROOT: $CLAUDE_PLUGIN_ROOT" \
+  || echo "FR_PLUGIN_ROOT: UNRESOLVED"
+```
+
+Candidates are ordered most-authoritative first: an ambient value wins; then this repo's own checkout (the dev / worktree case, so local edits are what runs); then the marketplace clone; then the highest-versioned entry in the version-keyed cache. The first directory that actually holds `scripts/fr-preflight.sh` wins, so a stale or partial candidate is skipped rather than trusted.
+
+**On `FR_PLUGIN_ROOT: UNRESOLVED`, stop** and tell the user the fresh-review plugin scripts could not be located — the install looks broken. Every later step would fail the same way.
+
+Otherwise carry the resolved path into Step 1: run its `fr-preflight.sh` command with the variable set **in that same shell**, because the fresh shell will not have it — prefix the command with `CLAUDE_PLUGIN_ROOT="<the resolved path>"`. You resolve it exactly once. From Step 1 on, `fr-preflight.sh` has written the root into `state.env`, and every later step below already sources `state.env` before its script call, which restores the variable into that call's own shell — no re-resolution, no threading by hand.
+<!-- FR:BOOTSTRAP:END -->
+
 ### Step 1: Preflight
 
 ```bash
@@ -168,7 +197,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --codex            # review
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42 --codex    # pr-remote + Codex
 ```
 
-This probes the repo, resolves the review scope, creates the run directory, and writes `state.env`. Export `RUN_DIR` from its output — every later script takes it as `$1`. Pass the flags from the Modes table verbatim, and add `--codex` only when the invocation asked for it (see "The Codex opt-in"); the script rejects an unknown flag or mode with a non-zero exit rather than falling back to a default, because a silently-defaulted `--pr` would review the local branch under someone else's PR number.
+<!-- FR:BOOTSTRAP:START -->
+Run this with the plugin root from Step 0 set in the same shell — prefix the command with `CLAUDE_PLUGIN_ROOT="<the path Step 0 resolved>"`, since this fresh shell does not carry it.
+<!-- FR:BOOTSTRAP:END -->
+This probes the repo, resolves the review scope, creates the run directory, and writes `state.env` — including the plugin root itself, so no later step has to resolve it again. Export `RUN_DIR` from its output — every later script takes it as `$1`. Pass the flags from the Modes table verbatim, and add `--codex` only when the invocation asked for it (see "The Codex opt-in"); the script rejects an unknown flag or mode with a non-zero exit rather than falling back to a default, because a silently-defaulted `--pr` would review the local branch under someone else's PR number.
 
 On `STATUS: stop`, tell the user and stop. `STOP_REASON` is one of:
 
@@ -203,7 +235,7 @@ The run directory persists, unlike a `mktemp` scratch dir — it is the record t
 Skip entirely unless `PR_REF` is set.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-pr-resolve.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-pr-resolve.sh" "$RUN_DIR"
 ```
 
 Turns the ref into a reviewable local diff plus a tree reviewers can open files from, and overwrites `REVIEW_SCOPE`, `DIFF_BASE`, `DIFF_CMD`, and `SOURCE_ROOT` in `state.env`. It also sets `CHECKPOINT=pr_remote`, which is what makes Steps 3, 6.5, 8.6, and 9 take their pr-remote branches without being told twice.
@@ -240,7 +272,7 @@ State `SOURCE_ROOT` too whenever it is not the repo root. It is the one piece of
 **Skip this step entirely in pr-remote mode** — `CHECKPOINT` is already `pr_remote`, the diff comes from two committed refs, and there is nothing of yours under review. Committing the user's unrelated work-in-progress in order to review someone else's PR would be a mutation with no purpose.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-checkpoint.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-checkpoint.sh" "$RUN_DIR"
 ```
 
 Commits everything with `--no-verify` (this skill IS the review), or self-skips when the tree is already clean. `CHECKPOINT` comes back as exactly one of `committed`, `skipped`, `failed` — never empty, because three later steps branch on it and an unset value fails *silently* rather than loudly. `CHECKPOINT_SHA` is always set.
@@ -256,7 +288,7 @@ On `CHECKPOINT: failed`, continue in no-checkpoint mode: the packet builds from 
 ### Step 4: Build the shared diff packet and classify risk
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-packet.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-packet.sh" "$RUN_DIR"
 ```
 
 Materializes the scope **once** into `$RUN_DIR/packet/` — `diff.patch`, `stat.txt`, `files.txt`, `scope.txt` — and classifies risk by pattern count over the patch, so the orchestrator sees integers rather than a diff. Every reviewer is handed these exact paths.
@@ -276,7 +308,7 @@ State the file count and risk class out loud. If `LINES` exceeds ~2000, warn tha
 Skip unless `MODE` is `pr`.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-ddd-vocab.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-ddd-vocab.sh" "$RUN_DIR"
 ```
 
 Decides which vocabulary Pass N speaks in and materializes it as `packet/ddd.md`. Resolution order is the ddd-refiner's output first, tactical defaults second:
@@ -485,13 +517,13 @@ No remaining Claude pass natively hunts for intent — that was `/review`'s habi
 The prompt asked the reviewers not to write. This verifies it, because a subagent inherits the parent's tool access — there is no per-call tool restriction to lean on.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-mutation-check.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-mutation-check.sh" "$RUN_DIR"
 ```
 
 `LEAK: none` → proceed. `LEAK: detected` → re-run with `--revert` to quarantine and restore:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-mutation-check.sh" "$RUN_DIR" --revert
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-mutation-check.sh" "$RUN_DIR" --revert
 ```
 
 The script picks its own baseline from `CHECKPOINT`, and that distinction is the whole reason it is a script and not an inline `git status`:
@@ -642,7 +674,7 @@ Then update `$RUN_DIR/report.md` and set `codex.changed_verdict` in the run log.
 Build the pass list from the passes that actually ran and returned `STATUS: ok`. Start from `lattice,cso` (dropping either that failed), and append `,codex` **only** when Codex was requested (`CODEX_REQUESTED: 1`) *and* returned `STATUS: ok`. Then:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-handoff.sh" \
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-handoff.sh" \
   "$RUN_DIR" "$STATUS" "$VERDICT" "$FR_PASSES" "$RUN_DIR/findings.json"
 ```
 
@@ -668,7 +700,7 @@ In no-checkpoint mode, still write the entry but expect no suppression: the logg
 Regardless of verdict:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-restore.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-restore.sh" "$RUN_DIR"
 ```
 
 Three independent undos, each separately gated, which is why this is a script:
@@ -718,7 +750,7 @@ Write `$RUN_DIR/report.md` (the Step 8 chat output verbatim, plus scope, pass in
 Then:
 
 ```bash
-FR_STATUS="$STATUS" bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-log.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; FR_STATUS="$STATUS" bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-log.sh" "$RUN_DIR"
 ```
 
 The script validates the JSON, appends it as one line to `$LOG_DIR/runs.jsonl`, prunes old run directories to `FR_RUN_RETENTION`, and pings the gstack timeline. Validation **gates** the append rather than following it: a malformed line in `runs.jsonl` breaks every future analysis of it. On `RUN_JSON: invalid`, `$RUN_DIR/run.json` is kept — tell the user the index entry was skipped, and why.

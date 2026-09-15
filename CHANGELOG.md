@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.15.1 — 2026-09-15
+
+### `fresh-review` 0.9.0 → 0.9.1: stop depending on an ambient `CLAUDE_PLUGIN_ROOT`
+
+Every script call in the skill is composed as `bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-*.sh"`. Claude
+Code exports `CLAUDE_PLUGIN_ROOT` into a plugin's own commands and hooks, but **not** into the
+ad-hoc Bash-tool shell the skill body drives once the Skill tool has loaded `SKILL.md` — and each
+Bash-tool call is a fresh shell. In a real run the variable was empty, so every invocation collapsed
+to `bash "/scripts/fr-*.sh"` and the orchestrator had to set the root by hand for each call. This
+makes the root resolve deterministically instead.
+
+- **New Step 0 — bootstrap.** Before Step 1, the orchestrator resolves the plugin root when the
+  ambient variable is unset/empty, from an ordered candidate list: this repo's checkout (dev /
+  worktree), the marketplace clone, then the highest-versioned entry in the version-keyed cache —
+  first directory that actually holds `scripts/fr-preflight.sh` wins. On `UNRESOLVED` the run stops
+  with a clear message instead of failing one call at a time.
+- **`fr-preflight.sh` records the root it ran from** (self-resolved via `BASH_SOURCE`) into
+  `state.env` and prints it as `PLUGIN_ROOT`. Every later step already sources `state.env` before its
+  script call, so the root is restored into each fresh shell — the root is resolved once, not
+  threaded by hand.
+- **Vendoring is preserved.** `vendor.sh` strips the plugin-only Step 0 block before rewriting
+  `${CLAUDE_PLUGIN_ROOT}/scripts/` references to repo-root paths, so a vendored consumer copy still
+  contains zero `CLAUDE_PLUGIN_ROOT` and resolves its scripts from the repo root. The vendor test
+  suite is unchanged and passes.
+
 ## 0.14.0 — 2026-09-07
 
 ### `fresh-review` 0.7.0 → 0.8.0: pr-remote runs the gstack `/review` army

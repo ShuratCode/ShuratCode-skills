@@ -33,16 +33,22 @@ SHA="$(git -C "$PLUGIN_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 mkdir -p "$TARGET/scripts"
 
-# 1. SKILL.md — rewrite every ${CLAUDE_PLUGIN_ROOT}/scripts/ reference so the
-#    vendored scripts resolve from the repo root with no CLAUDE_PLUGIN_ROOT.
-#    Prose mentions of ~/.claude/skills/... (gstack/cso/ship) are left as-is:
-#    full-tier consumers have gstack.
+# 1. SKILL.md — drop the plugin-only Step 0 bootstrap block, then rewrite every
+#    ${CLAUDE_PLUGIN_ROOT}/scripts/ reference so the vendored scripts resolve from
+#    the repo root with no CLAUDE_PLUGIN_ROOT. The bootstrap block resolves
+#    CLAUDE_PLUGIN_ROOT for plugin installs; a vendored copy has no plugin root
+#    (its refs become repo-root paths) and the block's bare CLAUDE_PLUGIN_ROOT
+#    mentions would otherwise survive the rewrite, which only touches the
+#    `${CLAUDE_PLUGIN_ROOT}/scripts/` form. Prose mentions of ~/.claude/skills/...
+#    (gstack/cso/ship) are left as-is: full-tier consumers have gstack.
 REWRITES="$(python3 - "$SRC_SKILL" "$TARGET/SKILL.md" <<'PY'
-import sys
+import re, sys
 src, dst = sys.argv[1], sys.argv[2]
+text = open(src).read()
+text = re.sub(r'\n*<!-- FR:BOOTSTRAP:START -->.*?<!-- FR:BOOTSTRAP:END -->\n*',
+              '\n\n', text, flags=re.DOTALL)
 search = '${CLAUDE_PLUGIN_ROOT}/scripts/'
 replace = '$(git rev-parse --show-toplevel)/.claude/skills/fresh-review/scripts/'
-text = open(src).read()
 print(text.count(search))
 open(dst, "w").write(text.replace(search, replace))
 PY
