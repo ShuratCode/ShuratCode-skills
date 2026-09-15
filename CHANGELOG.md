@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.15.2 — 2026-09-15
+
+### `fresh-review` 0.9.1 → 0.9.2: disable git hooks for the review's own git operations
+
+Fresh-review runs git commands against untrusted content — the branch or PR under review — and two of
+them fire a hook on the reviewer's host before any review starts. Both are now run with
+`-c core.hooksPath=/dev/null`, which disables hooks for that one invocation only, without touching the
+repo config or leaking into the new worktree.
+
+- **`fr-checkpoint.sh` — the reproducing RCE.** The WIP checkpoint commits with `git commit --no-verify`.
+  `--no-verify` skips `pre-commit` and `commit-msg` but **not** `prepare-commit-msg`. A reviewer with
+  `core.hooksPath` pointing at an in-repo dir (a committed `.githooks`, husky) who reviews a
+  locally checked-out untrusted branch that ships an executable hook there runs it during the checkpoint.
+- **`fr-pr-resolve.sh` — post-checkout on PR materialization.** `git worktree add` runs the
+  `post-checkout` hook. A relative `core.hooksPath` resolves against the invoking worktree, so a reviewer
+  whose checkout carries such a hooks dir has that hook fire as a side effect of materializing the PR
+  head — before the diff is even read.
+- **Regression suite `tests/test-hook-isolation.sh`.** For each vector it first proves the hook is live
+  under the plain git command (a positive control), then asserts the fresh-review script leaves it
+  unfired while still committing the checkpoint / resolving the PR. Verified against git 2.55.0.
+- Separate from the 0.9.0 UI-launch removal and the 0.9.1 plugin-root fix, which touch different files.
+
 ## 0.15.1 — 2026-09-15
 
 ### `fresh-review` 0.9.0 → 0.9.1: stop depending on an ambient `CLAUDE_PLUGIN_ROOT`
