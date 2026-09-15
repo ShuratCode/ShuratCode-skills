@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.15.0 — 2026-09-15
+
+### `fresh-review` 0.8.0 → 0.9.0: pr mode gets a diagram, a risk class, and best-effort UI shots
+
+`pr` mode used to answer *what does this change do* with a wall of prose. Three additions make that
+answer faster to read and put the stakes and the visible surface next to it. All three are `pr` mode
+only — the default pre-commit run stays two-pass and lean.
+
+- **Pass N now draws the flow.** The narrator leads with a single Mermaid **sequence or flow diagram**
+  of the changed path, in the repo's own DDD vocabulary, and keeps only the short annotation sections
+  (headline, new/changed rules, boundaries, NOT-IN-THIS-CHANGE, and the title-mismatch line). The
+  prose "WHAT CHANGED" / "LIFECYCLE" walls are gone — the diagram carries the flow. A tooling-only
+  change returns `DIAGRAM: none` rather than an invented diagram. Rendered to PNG via `mmdc` when it
+  is on `PATH`; otherwise printed as a fenced block. Same isolation as before, so a diagram the pass
+  declined to draw is never hand-fixed with producer knowledge.
+- **New Pass K — risk.** A dedicated isolated subagent classifies the whole change `low` / `med` /
+  `high` by blast radius, reversibility, security/data surface, coupling, operational surface, and
+  test coverage — the overall class is the *worst* live factor, not an average. gstack ships no
+  change-level risk framework (its `/review` scores per-finding confidence), so this uses
+  fresh-review's own rubric, documented in the pass. The class shows in the verdict header and the
+  pass line; the mechanical `RISK` (`normal`/`high`) is unchanged and still gates `/cso` depth.
+- **New Step 4.6 — best-effort UI preview.** When the change touches frontend and the author pushed
+  no picture, `fr-ui-detect.sh` finds a safe launch recipe and the orchestrator screenshots the
+  changed routes, sending the PNGs to chat. Gated three ways (frontend change, no author image, a
+  launch recipe that does not edit a reviewed tree), bounded by `FR_UI_PREVIEW_BUDGET`, and it never
+  blocks the verdict — any snag prints `UI preview — not shown: <reason>` and the run continues. The
+  PR body is read here, in a boolean-emitting script, precisely so it never reaches Pass N. Nothing is
+  ever posted to the PR.
+- **Run log `schema:7`** adds an optional `risk` pass and top-level `risk_level`, a `ui_preview`
+  object, and `narrative.diagram`, all pr-mode only and all distinguished from their absent forms in
+  older entries.
+- New script `fr-ui-detect.sh` with test coverage; SKILL.md otherwise carries the pass prompts.
+
 ## 0.14.0 — 2026-09-07
 
 ### `fresh-review` 0.7.0 → 0.8.0: pr-remote runs the gstack `/review` army
