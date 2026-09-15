@@ -1,34 +1,24 @@
 #!/usr/bin/env bash
-# fr-ui-detect.sh <RUN_DIR> — Step 4.6, pr mode only. Decides whether the
-# orchestrator should attempt a best-effort UI screenshot of the change, and
-# hands it everything it needs to try without ever reading the diff itself.
+# fr-ui-detect.sh <RUN_DIR> — Step 4.6, pr mode only. Reports whether the diff
+# touches frontend UI, so the orchestrator can print one honest line —
+# `UI preview — not shown: <reason>`. It NEVER launches an app.
 #
-# Three independent gates, each a mechanical count or a file probe, all reduced
-# to keys before printing so the orchestrator never sees diff content:
-#
-#   1. FRONTEND_HITS  — does the change touch UI code at all? (grep over files.txt)
-#   2. LAUNCH_KIND    — is there a way to start the app without editing a tree
-#                       under review? (a committed .claude/launch.json, or a
-#                       dev/storybook script we may synthesize one from *only* in
-#                       the disposable pr-remote worktree)
-#   3. PR_HAS_IMAGE   — did the author already push a picture or mock? If so the
-#                       reviewer does not need one generated. This is the ONE
-#                       place the PR body is read, and it is read here — in a
-#                       script that emits a boolean — precisely so the body never
-#                       reaches Pass N, whose whole value is deriving the change
-#                       from code alone. The body text is computed over and
-#                       discarded; only the boolean is kept.
-#
-# UI_ELIGIBLE is yes only when a frontend change has a safe way to launch and the
-# author supplied no image. Everything else prints UI_ELIGIBLE: no with a
-# UI_REASON the orchestrator states out loud — a "not shown" line is information,
-# not a silent skip.
+# fresh-review does not launch a review tree. A tree under review may hold
+# untrusted code — a PR fetched with `--pr`, or a fork / dependabot branch you
+# checked out locally to review — and whether the code is your own is NOT
+# something that can be decided mechanically from the branch or the scope. So
+# auto-launching any review tree is an arbitrary-code-execution risk on the
+# reviewer's host (launch its `.claude/launch.json` or `dev` script and the
+# author's code runs with your live credentials). Launching was removed in
+# v0.9.0 rather than gated on a signal that cannot be trusted. To view the UI,
+# open the branch yourself.
 #
 # Output contract (stdout):
 #   === FRESH-REVIEW UI DETECT ===
-#   UI_ELIGIBLE / UI_REASON / FRONTEND_HITS / LAUNCH_KIND / LAUNCH_CMD
-#   PR_HAS_IMAGE / ROUTES_HINT
+#   UI_ELIGIBLE / UI_REASON / FRONTEND_HITS
 #   === END ===
+#
+# UI_ELIGIBLE is always `no` — the script produces a reason, never a launch.
 
 set -u
 
@@ -44,40 +34,28 @@ FILES="$RUN_DIR/packet/files.txt"
 UI_ELIGIBLE=no
 UI_REASON=""
 FRONTEND_HITS=0
-LAUNCH_KIND=none
-LAUNCH_CMD=""
-PR_HAS_IMAGE=unknown
-ROUTES_HINT=""
 
 emit() {
   kv UI_ELIGIBLE "$UI_ELIGIBLE"
   kv UI_REASON "$UI_REASON"
   kv FRONTEND_HITS "$FRONTEND_HITS"
-  kv LAUNCH_KIND "$LAUNCH_KIND"
-  kv LAUNCH_CMD "$LAUNCH_CMD"
-  kv PR_HAS_IMAGE "$PR_HAS_IMAGE"
-  kv ROUTES_HINT "$ROUTES_HINT"
   printf '%s\n' "=== FRESH-REVIEW UI DETECT ===" \
     "UI_ELIGIBLE: $UI_ELIGIBLE" \
     "UI_REASON: $UI_REASON" \
     "FRONTEND_HITS: $FRONTEND_HITS" \
-    "LAUNCH_KIND: $LAUNCH_KIND" \
-    "LAUNCH_CMD: $LAUNCH_CMD" \
-    "PR_HAS_IMAGE: $PR_HAS_IMAGE" \
-    "ROUTES_HINT: $ROUTES_HINT" \
     "=== END ==="
   exit 0
 }
 
-# pr mode is the only mode with a narrative reader; a UI preview belongs with it.
+# pr mode is the only mode with a narrative reader; UI context belongs with it.
 if [ "${MODE:-review}" != "pr" ]; then
   UI_REASON="not pr mode"
   emit
 fi
 
-# --- Gate 1: is this a frontend change at all? --------------------------------
-# Component frameworks and stylesheets are unambiguous. Bare .ts/.js are not —
-# they are as often backend — so they count only under a conventional UI dir.
+# Does the change touch frontend UI at all? Component frameworks and stylesheets
+# are unambiguous; bare .ts/.js are as often backend, so they count only under a
+# conventional UI directory.
 FRAMEWORK_RX='\.(tsx|jsx|vue|svelte|astro|mdx|css|scss|sass|less|styl|html)$'
 UIDIR_RX='(^|/)(components?|pages|app|views?|screens?|routes?|ui|widgets?|layouts?|templates?|stories|public|assets/(css|scss|styles?))(/|$)'
 
@@ -94,80 +72,9 @@ if [ "$FRONTEND_HITS" -eq 0 ]; then
   emit
 fi
 
-# A short hint at which routes changed, so the orchestrator can navigate to them
-# rather than only the app root. Pages/routes/screens dirs are the convention.
-ROUTES_HINT=$(printf '%s\n' "$PATHS" \
-  | grep -iE '(^|/)(pages|routes?|screens?|views?)(/|$)' \
-  | grep -iE "$FRAMEWORK_RX" \
-  | head -5 | paste -sd, - 2>/dev/null || true)
-
-# --- Gate 3: did the author already push an image? ----------------------------
-# Two ways an author supplies a picture: an image asset committed in the PR, or
-# an image embedded in the PR description/comments. Check both. Only meaningful
-# with a real PR (pr-remote); on your own branch there is no description to read,
-# so treat it as "no image" and let gates 1 and 2 decide.
-IMG_ASSET=$(printf '%s\n' "$PATHS" | grep -icE '\.(png|jpe?g|gif|webp|avif)$' || true)
-
-if [ "$IMG_ASSET" -gt 0 ]; then
-  PR_HAS_IMAGE=yes
-elif [ "${PR_NUMBER:-}" != "" ] && [ "${HAS_GH:-0}" = "1" ]; then
-  # Read body + comments, grep for an embedded image, discard the text. The
-  # boolean is all that survives — the body must never reach a pass.
-  BODYTEXT=$(gh pr view "$PR_NUMBER" --json body,comments \
-    --jq '.body, (.comments[]?.body)' 2>/dev/null || true)
-  if printf '%s' "$BODYTEXT" \
-      | grep -qiE '!\[|<img|user-attachments|githubusercontent\.com/.*\.(png|jpe?g|gif|webp)|\.(png|jpe?g|gif|webp)([)"'"'"'?]|$)'; then
-    PR_HAS_IMAGE=yes
-  else
-    PR_HAS_IMAGE=no
-  fi
-else
-  # No PR to inspect (pr-local) — nobody pushed a description here.
-  PR_HAS_IMAGE=no
-fi
-
-if [ "$PR_HAS_IMAGE" = "yes" ]; then
-  UI_REASON="author already supplied an image"
-  emit
-fi
-
-# --- Gate 2: can we launch without mutating a tree under review? --------------
-SR="${SOURCE_ROOT:-$PWD}"
-if [ -f "$SR/.claude/launch.json" ]; then
-  LAUNCH_KIND=launch.json
-  LAUNCH_CMD="preview_start (name from $SR/.claude/launch.json)"
-else
-  # A dev/storybook script is a launch recipe, but turning it into one needs a
-  # .claude/launch.json written into the tree. That is safe ONLY in the
-  # disposable pr-remote worktree (REVIEW_SCOPE=pr), which Step 9 deletes.
-  # On your own checkout it would inject a file into the diff under review, so
-  # we refuse and say why.
-  PKG="$SR/package.json"
-  if [ -f "$PKG" ]; then
-    SCRIPT=$(python3 -c '
-import json,sys
-try: s=json.load(open(sys.argv[1])).get("scripts",{})
-except Exception: s={}
-for k in ("storybook","dev","start","serve","preview"):
-    if k in s: print(k); break
-' "$PKG" 2>/dev/null)
-    if [ -n "$SCRIPT" ]; then
-      if [ "${REVIEW_SCOPE:-}" = "pr" ]; then
-        LAUNCH_KIND="script:$SCRIPT"
-        LAUNCH_CMD="npm run $SCRIPT"
-      else
-        UI_REASON="a '$SCRIPT' script exists but no .claude/launch.json; synthesizing one would edit your checkout — add a launch.json to enable UI preview here"
-        emit
-      fi
-    fi
-  fi
-fi
-
-if [ "$LAUNCH_KIND" = "none" ]; then
-  UI_REASON="no launch recipe (.claude/launch.json or a dev/storybook script) in ${SR}"
-  emit
-fi
-
-UI_ELIGIBLE=yes
-UI_REASON="frontend change, no author image, launchable via $LAUNCH_KIND"
+# Frontend changed — but fresh-review never launches a review tree (see the file
+# header for why). Report it as an honest "not shown" so the reviewer opens the
+# branch themselves. This holds for every scope, launch.json or not: a review
+# tree is never auto-launched.
+UI_REASON="app launching removed — fresh-review does not launch a review tree (${FRONTEND_HITS} frontend file(s) changed); open the branch yourself to view the UI"
 emit

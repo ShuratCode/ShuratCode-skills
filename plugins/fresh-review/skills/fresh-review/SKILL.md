@@ -23,13 +23,13 @@ description: |
 
   Has a second mode — **pr review** — that adds a diagram-first account of what the change does,
   drawn as a Mermaid sequence/flow diagram in the repo's own domain vocabulary rather than a wall of
-  prose, a low/med/high risk classification of the whole change, and — best-effort, when the change
-  touches frontend and the author pushed no picture — screenshots of the new UI. Use it when the user
+  prose, a low/med/high risk classification of the whole change, and a one-line note when the change
+  touches frontend UI (it does not launch or screenshot the app). Use it when the user
   asks for a "pr review", "review this PR", "explain this PR", "what does this PR do", "what does this
   change do", "summarize this change/PR", "diagram this PR", "explain my changes in plain English",
   "describe this PR for a non-engineer", "write the PR description", or names a PR by number or URL
   ("review PR 42", "look at github.com/o/r/pull/42"). That mode reviews *and* narrates: it is the
-  default run plus a narrator pass, a risk pass, and a UI capture, never a summary in place of a review.
+  default run plus a narrator pass, a risk pass, and a UI-touch note, never a summary in place of a review.
 
   This is the right tool whenever the producer-Claude and the reviewer-Claude would otherwise be the
   same instance with the same context — the entire point is to break that bias. Do NOT call
@@ -61,8 +61,8 @@ Two output shapes, one machine. Every mode fans out the same critic passes again
 | The user's words | Preflight flags | Subject of the review | Chat output |
 |---|---|---|---|
 | "fresh review", "review before I commit", "what did I miss" | *(none)* | your branch | verdict + findings |
-| "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **diagram narrative** + **risk class** + verdict + findings (+ UI screenshots when it can) |
-| "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **diagram narrative** + **risk class** + verdict + findings (+ UI screenshots when it can) |
+| "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **diagram narrative** + **risk class** + verdict + findings (+ a UI-touch note) |
+| "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **diagram narrative** + **risk class** + verdict + findings (+ a UI-touch note) |
 
 Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do not re-derive it later.
 
@@ -80,7 +80,7 @@ Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do
 
 Everything downstream keys off `CODEX_REQUESTED` from `state.env`: Step 5 launches Pass C only when it is `1`, and the pass line, triage convergence, handoff, and log all treat an un-requested Codex as simply absent — distinct from a requested one that failed.
 
-**`pr` mode adds three passes beyond the critics — N, K, and a best-effort UI capture.** Pass N (narrator) draws the changed flow as a Mermaid **sequence or flow diagram** in the repo's own DDD vocabulary, at the altitude of someone who owns the product and does not read code — a diagram, not a wall of summary prose. Pass K (risk) classifies the whole change `low` / `med` / `high` by blast radius and reversibility, so the reader sees the stakes next to the verdict. And Step 4.6 attempts, best-effort and never blocking, to screenshot the changed UI when the change touches frontend and the author pushed no picture. All three run *alongside* the critics, never instead of them: a diagram or a risk label on an unreviewed change is how a change gets waved through on the strength of a good description.
+**`pr` mode adds two passes beyond the critics — N and K — plus a UI presence check.** Pass N (narrator) draws the changed flow as a Mermaid **sequence or flow diagram** in the repo's own DDD vocabulary, at the altitude of someone who owns the product and does not read code — a diagram, not a wall of summary prose. Pass K (risk) classifies the whole change `low` / `med` / `high` by blast radius and reversibility, so the reader sees the stakes next to the verdict. And Step 4.6 reports, in one line, whether the change touches frontend UI — it does **not** launch the app or take screenshots (launching a review tree is an RCE risk; see Step 4.6). Both passes run *alongside* the critics, never instead of them: a diagram or a risk label on an unreviewed change is how a change gets waved through on the strength of a good description.
 
 ### pr-local and pr-remote
 
@@ -106,14 +106,13 @@ CSO_CMD="/cso --diff"                    # gstack security audit, scoped to bran
 CODEX_JOIN_BUDGET=240                    # seconds to wait for Codex after the Claude passes return
 FR_RUN_RETENTION=20                      # run directories kept before pruning (env var, read by fr-log.sh)
 DDD_DOC=".lattice/standards/ddd-principles.md"   # narrative vocabulary; resolved by fr-ddd-vocab.sh
-FR_UI_PREVIEW_BUDGET=90                  # seconds Step 4.6 gives a UI capture before abandoning it (pr mode)
 ```
 
 - Review scope is resolved mechanically by `fr-preflight.sh`: `branch` (merge-base..worktree) whenever an `origin/<base>` exists to merge-base against, `working` otherwise — or `pr` (merge-base..PR head), set by `fr-pr-resolve.sh` when a PR ref was given. `branch` matches what a human PR reviewer sees, and a Lattice `checkpoint_mode: continuous` session already has WIP commits on the branch that `working` scope would silently skip.
 - `/cso --diff` scopes the audit to changed files and keeps daily mode's 8/10 confidence gate. High-risk diffs upgrade to `--diff --comprehensive` (Step 4).
 - **Codex is opt-in.** When requested (`--codex`, see "The Codex opt-in") it runs as a full pass, in the background, concurrent with the others. When not requested it does not run at all, and the run has two critic passes rather than three. Rationale for the background invocation is in Pass C.
 - **The diagram narrative and risk class are `pr` mode only.** Pass N draws the changed flow as a Mermaid diagram (rendered to PNG via `mmdc` when it is on `PATH`, otherwise printed as a fenced block); Pass K classifies the change `low`/`med`/`high`. Neither runs in the default pre-commit mode, which stays lean. The mechanical `RISK` (`normal`/`high`) from `fr-packet.sh` is unchanged and still gates `/cso` depth in every mode — it is a separate signal from Pass K's class.
-- **UI preview is `pr` mode, best-effort, and gated** by `fr-ui-detect.sh` (frontend change + no author image + a safe launch recipe). It uses the environment's browser-preview and file-send tools when present and degrades to a one-line "not shown" reason when anything is missing or fails. It never blocks the verdict.
+- **UI presence check is `pr`-mode only and never launches anything.** `fr-ui-detect.sh` reports whether the diff touches frontend UI and Step 4.6 prints one `UI preview — not shown: <reason>` line. It does **not** launch an app or take screenshots: a review tree may hold untrusted code and provenance is not mechanically decidable, so auto-launching it is an RCE risk (Step 4.6, "Why UI preview does not launch"). It never blocks the verdict.
 
 ## Why gstack's `/review` is not a pass here
 
@@ -142,7 +141,7 @@ The reverse redundancy — ship re-running what *this* skill already did — is 
 
 Two audiences, two artifacts. Do not confuse them.
 
-- **Chat is for the human.** It gets the verdict on the first line and *every* finding from *every* pass, merged and triaged — plus, in `pr` mode, the diagram narrative in full above it, the risk class, and any UI screenshots. It is never a pointer to a file. "Full report at `<path>`" is not an acceptable substitute for the findings themselves, and it is not one for the narrative either: in `pr` mode the narrative *is* what the user asked for.
+- **Chat is for the human.** It gets the verdict on the first line and *every* finding from *every* pass, merged and triaged — plus, in `pr` mode, the diagram narrative in full above it, the risk class, and a one-line note if the change touches UI. It is never a pointer to a file. "Full report at `<path>`" is not an acceptable substitute for the findings themselves, and it is not one for the narrative either: in `pr` mode the narrative *is* what the user asked for.
 - **Disk is for the agents and for later analysis.** Raw pass reports, the diff packet, and the run log live in the run directory. Nothing there is required reading for the user.
 - **Nothing is for GitHub.** No mode posts, comments, or edits a PR. See "What this skill does NOT do".
 
@@ -159,7 +158,7 @@ The same principle governs the shell work: every mechanical step is a script in 
 
 ## Workflow
 
-Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI preview) runs only in `pr` mode, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode — Pass N (narrative) and Pass K (risk) in `pr` mode, and Pass R (the review army) additionally in pr-remote. Nothing else branches on mode.
+Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode — Pass N (narrative) and Pass K (risk) in `pr` mode, and Pass R (the review army) additionally in pr-remote. Nothing else branches on mode.
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
@@ -297,37 +296,31 @@ Decides which vocabulary Pass N speaks in and materializes it as `packet/ddd.md`
 
 Read the printed keys, not the brief. The brief exists to be handed to Pass N by path.
 
-### Step 4.6: UI preview (pr mode only, best-effort)
+### Step 4.6: UI presence check (pr mode only)
 
-Skip unless `MODE` is `pr`. This step is the one place the skill touches a running app, and it is **best-effort by contract**: it produces screenshots of the changed UI when — and only when — it can do so cheaply, safely, and without a question, and otherwise prints one honest line and moves on. It never blocks, never installs, and never edits a tree under review.
+Skip unless `MODE` is `pr`. This step reports whether the change touches frontend UI, so the reader gets one honest line about it. **It never launches an app** — see "Why UI preview does not launch" below.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-ui-detect.sh" "$RUN_DIR"
 ```
 
-The script reduces three gates to keys — it never reads the diff itself:
+The script reads only the packet's file list (never the diff content) and prints:
 
-- `FRONTEND_HITS` — whether the change touches UI code at all (component frameworks, stylesheets, or files under a conventional UI directory). Zero → nothing to show.
-- `PR_HAS_IMAGE` — whether the author already supplied a picture. `yes` if the diff adds an image asset, or (pr-remote only) if the PR description or a comment embeds one. This is the **only** place the PR body is read, and it is read *here*, in a script that emits a boolean, precisely so the body never reaches Pass N — whose entire value is deriving the change from code alone. If the author pushed a mock, the reviewer does not need one generated.
-- `LAUNCH_KIND` / `LAUNCH_CMD` — a way to start the app *without* mutating a reviewed tree. A committed `.claude/launch.json` under `SOURCE_ROOT` qualifies in either mode. A bare `dev`/`storybook` script qualifies **only in pr-remote**, where `SOURCE_ROOT` is the disposable worktree Step 9 deletes — synthesizing a `launch.json` there injects nothing into anyone's diff. On your own branch a script alone is refused, with a reason that says to add a `launch.json`.
+- `FRONTEND_HITS` — whether the change touches UI code at all (component frameworks, stylesheets, or files under a conventional UI directory).
+- `UI_ELIGIBLE` — always `no`. The script produces a reason, never a launch.
+- `UI_REASON` — the one-line explanation, which becomes `UI preview — not shown: <reason>` in Step 8. `not pr mode`, `no frontend files in the diff`, or `app launching removed — …` when the diff does touch UI.
 
-**On `UI_ELIGIBLE: no`, do nothing but remember `UI_REASON`** — it becomes the one-line `UI PREVIEW — not shown: <reason>` in Step 8. A skipped preview is information, not silence.
+**Act on it in one line: print `UI preview — not shown: <UI_REASON>` in Step 8 and move on.** There is nothing to launch, navigate, screenshot, or send. The line is information — it tells a reader "there is UI in this change, open the branch to see it" — not a screenshot.
 
-**On `UI_ELIGIBLE: yes`, attempt the capture — bounded, and abandon on the first snag:**
+#### Why UI preview does not launch
 
-1. Launch the app. With `LAUNCH_KIND: launch.json`, `preview_start` by the config's name. With `LAUNCH_KIND: script:<name>` (pr-remote only), write a minimal `.claude/launch.json` into `SOURCE_ROOT` (the disposable worktree) for that script, then `preview_start`. Give it a short window to come up; if it does not, stop.
-2. Navigate to the changed routes named in `ROUTES_HINT` (fall back to the app root if empty), and screenshot each — at most three — into `$RUN_DIR/ui/`.
-3. `preview_stop`, then `SendUserFile` the PNGs with a caption naming the route each shows.
+Earlier drafts launched the app to screenshot the changed routes. That was removed in v0.9.0 because launching a review tree is an arbitrary-code-execution risk on the reviewer's host, and the risk cannot be gated away:
 
-**Hard rules for this step, because it is the one that reaches outside:**
+- A tree under review may hold untrusted code — a PR fetched with `--pr` (pr-remote), **or** a fork / dependabot branch checked out locally and reviewed with `--mode pr`.
+- Launching it (`preview_start` on a committed `.claude/launch.json`, or a `dev`/`storybook` script) runs the author's code with the reviewer's live `gh` / cloud / DB credentials.
+- **Provenance — "is this tree my own code?" — is not mechanically decidable.** A locally-checked-out untrusted branch is `REVIEW_SCOPE=branch` with `SOURCE_ROOT` pointing at your own checkout, indistinguishable from your own feature branch. Gating on scope or filesystem location (the earlier fix attempt) leaves the local-checkout door open, and git author metadata is spoofable. There is no signal here worth trusting with code execution.
 
-- **It is not allowed to block or to ask.** Any prompt, missing dependency, backend it cannot reach, port conflict, blank render, or timeout ends the attempt — you print `UI PREVIEW — not shown: <what failed>` and continue to Step 5. A change is never held up for a screenshot.
-- **It never runs the critics' clock.** Fan out Step 5 first or alongside; the preview is a side artifact, not a gate on the verdict. If it is still coming up when the review is ready, drop it.
-- **It reads the diff through the packet's file list only** (via the script) — the orchestrator still never loads diff content here.
-- **The synthesized `launch.json` lives only in the pr-remote worktree** and dies with it in Step 9. Never write one into the user's checkout; that is exactly what the pr-local refusal in `fr-ui-detect.sh` prevents.
-- **The launch/screenshot/send tools are the host session's, not the skill's.** A browser-preview family and a file-send tool are not declarable in skill `allowed-tools` (only base tool names are honored there), so this step uses whatever the running environment provides. Where none is available — a headless CI shell, a `/loop` with no browser — treat it exactly like a launch failure: print `UI preview — not shown: no preview capability here` and continue. The capability is a bonus, never a requirement.
-
-The images are for the human in chat, like the narrative — **never posted to the PR** (see "What this skill does NOT do").
+So the skill does not launch, in any mode. To view the UI, open the branch yourself in your own environment where you have judged it safe to run. Do not reintroduce a launch path gated on scope, worktree disposability, or author metadata — none of those is a trust boundary.
 
 ### Step 5: Fan out all reviewers (one parallel batch)
 
@@ -666,7 +659,7 @@ FRESH REVIEW — <COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT>
                  (pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES)
 <branch, or PR #<n> @ <short sha>> · <N> files, +<a>/−<b> · risk: <low|med|high> · <elapsed>
 passes: lattice <✓n|✗>  cso <✓n|✗>  review <✓n|✗>  codex <✓n|⧗ running|✗ reason>  risk <low|med|high|✗>  narrative <✓|✗>
-UI preview: <sent N screenshot(s) below | not shown: <reason>>          (pr mode only)
+UI preview: not shown: <UI_REASON>                                     (pr mode only; never launches)
 risk — <low|med|high>: <the RATIONALE line from Pass K>                 (pr mode only)
   blast-radius <·> reversibility <·> security-data <·> coupling <·> operational <·> test-coverage <·>
 not covered here — /ship Step 9 owns: performance, data-migration, api-contract, red-team.
@@ -696,7 +689,7 @@ Rules:
 - `narrative ✗` in the pass line means Pass N failed or was not run. In `review` mode omit the field entirely rather than printing `narrative —`.
 - **The header `risk:` is Pass K's class** (`low` / `med` / `high`) in `pr` mode. In `review` mode Pass K does not run — print the mechanical `RISK` there instead as `risk: <normal|HIGH>`, unchanged from before. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical — risk pass failed)` so the degrade is visible.
 - **`risk` in the pass line and the two `risk —` lines are `pr` mode only.** Omit all of them in `review` mode, exactly as `narrative` is omitted. Print `risk <low|med|high>` when Pass K returned, `risk ✗` when it failed. The `risk —` rationale line and the factor line come straight from Pass K's `RATIONALE` and `FACTORS`; drop both if Pass K failed.
-- **The `UI preview:` line is `pr` mode only.** Print `sent N screenshot(s) below` when Step 4.6 captured and sent images, or `not shown: <UI_REASON>` otherwise (no frontend, author already supplied an image, no launch recipe, or a capture that failed). Omit the line entirely in `review` mode. It is never a blocker — a missing preview never changes the verdict.
+- **The `UI preview:` line is `pr` mode only.** Print `not shown: <UI_REASON>` — the reason from `fr-ui-detect.sh` (`not pr mode`, `no frontend files in the diff`, or `app launching removed — …`). Step 4.6 never launches, so there is never a screenshot to announce. Omit the line entirely in `review` mode. It is never a blocker.
 - **`review` in the pass line is pr-remote only.** Omit the field entirely in `review` mode and in `pr`-on-your-branch — Pass R does not run there, exactly as `codex` is omitted on a Codex-off run. In pr-remote print `review ✓n` when it ran, `review ✗ no gstack` when `HAS_GSTACK: 0`, and `review ✗ <reason>` when it launched but failed.
 - **`codex` in the pass line has three shapes.** When `CODEX_REQUESTED: 0`, **omit the `codex` field entirely** — a Codex-off run makes no claim about Codex, exactly as `review` mode omits `narrative`. When it was requested but `HAS_CODEX: 0`, print `codex ✗ not installed`. When it ran, print `codex ✓n` / `⧗ running` / `✗ <reason>` as before. Never print `codex ✓0` on a run that did not launch it.
 - The `not covered here` line names what this skill structurally does not look at, so a `COMMIT` verdict is never mistaken for full coverage. It is not optional. Keep the parenthetical second line **only on a Codex-off run** (`CODEX_REQUESTED: 0`); drop it when Codex ran. If `HAS_GSTACK: 0`, replace the first line's trailing period with ` — but no gstack install was found, so nothing will run these.`
@@ -787,7 +780,7 @@ Write `$RUN_DIR/report.md` (the Step 8 chat output verbatim, plus scope, pass in
  "pr":{"number":0,"url":"","state":"","head":"","drift":false},
  "scope":"<REVIEW_SCOPE>","diff_base":"<DIFF_BASE>","checkpoint":"<CHECKPOINT_SHA>",
  "risk":"<RISK>","risk_level":"<low|med|high>",
- "ui_preview":{"eligible":false,"shown":0,"reason":"<UI_REASON>"},
+ "ui_preview":{"frontend":false,"reason":"<UI_REASON>"},
  "diff":{"files":0,"lines":0},
  "passes":[
    {"name":"lattice","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
@@ -807,7 +800,7 @@ Write `$RUN_DIR/report.md` (the Step 8 chat output verbatim, plus scope, pass in
 - Omit `pr` outside pr-remote mode, and both the `narrative` and `risk` passes outside `pr` mode — an absent pass and a failed one must stay distinguishable. Likewise omit `risk_level` (top-level) and the `ui_preview` object outside `pr` mode; they are pr-mode artifacts. `risk` (the mechanical class) is always present.
 - **Keep the mechanical `risk` and Pass K's `risk_level` distinct.** `risk` is `normal`/`high` from `fr-packet.sh`'s pattern count and gates `/cso` depth; `risk_level` is Pass K's `low`/`med`/`high` judgment and is what the header shows. In `review` mode `risk_level` is absent and only `risk` exists. When the `risk` pass failed, keep its entry with `"status":"failed"` and omit `risk_level`.
 - **Omit the `review` pass from `passes[]` outside pr-remote**, and when `HAS_GSTACK: 0` in pr-remote (it could not run). Keep the entry with `"status":"failed"` only when it launched and failed — same rule as `codex`.
-- `ui_preview.eligible` is `fr-ui-detect.sh`'s `UI_ELIGIBLE`, `shown` the count of screenshots actually sent, `reason` the `UI_REASON` (empty when shown succeeded). `narrative.diagram` records which shape Pass N drew (`sequence`, `flowchart`, or `none`) — the direct measure of whether the diagram-first mode is producing diagrams or declining them.
+- `ui_preview.frontend` is whether the diff touched UI (`fr-ui-detect.sh`'s `FRONTEND_HITS > 0`), and `reason` is the `UI_REASON`. Step 4.6 never launches, so there is no `shown`/`eligible` to record. `narrative.diagram` records which shape Pass N drew (`sequence`, `flowchart`, or `none`) — the direct measure of whether the diagram-first mode is producing diagrams or declining them.
 - `tools.codex` stays availability (`HAS_CODEX`), independent of whether the run requested Codex.
 
 Then:
@@ -850,8 +843,8 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Pass N invents a domain story for a tooling-only change** → print the review block alone and note it. This is the failure that makes the whole mode untrustworthy, so it is worth a `NOTES` line in the run log rather than a silent drop.
 - **Pass N returns invalid Mermaid** (renders to an error, or is not a fenced `mermaid` block) → print the headline and text sections without the diagram, note `narrative ✗ diagram` in NOTES, and do not hand-fix the syntax with your own knowledge of the change — a diagram you drew is the author's-claim contamination the isolation exists to prevent. Re-spawn once if it is cheap; otherwise ship the text sections alone.
 - **Pass K fails or is not returned** → the run is not blocked. Print the header risk as the mechanical class with ` (mechanical — risk pass failed)`, drop the `risk —` rationale and factor lines, keep the `risk` pass in the log with `"status":"failed"`, and continue. Risk is context for the verdict, never a gate on it.
-- **UI preview cannot be produced** (`UI_ELIGIBLE: no`, or the launch/screenshot fails) → never an error and never a blocker. Print `UI preview — not shown: <reason>` in Step 8 and move on. The commonest reasons are benign: no frontend change, the author already pushed a mock, or no launch recipe. A capture that hangs is abandoned, not waited on.
-- **UI preview would edit a reviewed tree** → `fr-ui-detect.sh` refuses in pr-local when only a `dev`/`storybook` script exists (no committed `launch.json`), because synthesizing one would inject a file into the diff under review. The synthesized `launch.json` is written only into the disposable pr-remote worktree. Never override this to force a preview.
+- **UI presence check** → never an error and never a blocker. Step 4.6 runs `fr-ui-detect.sh` and prints one `UI preview — not shown: <UI_REASON>` line (`not pr mode`, `no frontend files in the diff`, or `app launching removed — …`). It launches nothing, so there is no capture to hang, fail, or wait on.
+- **Do not reintroduce app launching** → launching a review tree was removed in v0.9.0 because it is an RCE risk that cannot be gated: a review tree may be untrusted (a `--pr` fetch, or a fork/dependabot branch checked out locally and reviewed with `--mode pr`), and provenance is not mechanically decidable. Never add a launch path gated on `REVIEW_SCOPE`, filesystem location, worktree disposability, or git author metadata — none of those is a trust boundary. To view the UI, open the branch yourself.
 - **PR head moves mid-review** (`HEAD_DRIFT: yes`) → not an error. Everything was reviewed at `PR_HEAD`; say so in the header and move on. Do not re-fetch — that would mix two commits' findings in one report.
 - **PR worktree survives the run** (`WORKTREE: failed`) → tell the user the path and that `git worktree remove --force <path>` clears it. Do not leave it undisclosed; it is a full checkout's worth of disk.
 
@@ -865,7 +858,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Run the CI gates.** Tests, coverage, and lint are `/ship`'s job. A `COMMIT` verdict says the code reads correctly, not that it passes.
 - **Stop `/ship` from reviewing again.** Ship's pre-landing review is unconditional and reviews the *final* diff — post-fix, post-CHANGELOG, post-base-merge — a different artifact from what these passes saw. `references/ship-dispatch-gate.md` trims the parts that are genuinely duplicated; the rest is supposed to run.
 - **Analyze runs across sessions.** The log is written to be analyzable; reading it is a separate tool's job.
-- **Post anything to GitHub.** The narrative, the risk class, and any UI screenshots are printed to chat and written to disk, never sent. No `gh pr comment`, no `gh pr review`, no `gh pr edit --body`, no uploading a screenshot to the PR, not even in pr-remote mode where a PR is plainly sitting there — publishing a review under the user's name is theirs to decide, and an unattended run inside `/loop` must not be able to do it. If they want it posted, they will say so, and that is a separate action taken with the text in front of them.
+- **Post anything to GitHub.** The narrative and the risk class are printed to chat and written to disk, never sent. No `gh pr comment`, no `gh pr review`, no `gh pr edit --body`, no uploading a screenshot to the PR, not even in pr-remote mode where a PR is plainly sitting there — publishing a review under the user's name is theirs to decide, and an unattended run inside `/loop` must not be able to do it. If they want it posted, they will say so, and that is a separate action taken with the text in front of them.
 - **Modify the PR under review.** pr-remote mode is read-only on someone else's branch. Findings are comments; the worktree is disposable and gets deleted.
 - **Review a PR from another repo.** `foreign_repo` stops it. There is no local tree to materialize the head into, and a patch without its source tree produces reviewers reading the wrong file contents. Clone that repo and run there.
 - **Replace reading the diff.** The narrative is at product altitude by construction — no paths, no names, no code. It tells you what changed and what it means; it cannot tell you whether line 84 is right. It is an orientation and a cross-check, not a substitute for review, which is exactly why this mode never ships it without one.
@@ -882,11 +875,11 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 
 **Codex still running when the Claude passes return** (a `--codex` run) → verdict prints as `codex ⧗ running`; the background task completes eight minutes later; Step 8.5 posts the addendum and records whether it moved the verdict.
 
-**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, the two Claude critics, plus Pass N (diagram), Pass K (risk), Step 4.5's vocabulary resolution, and Step 4.6's UI-preview probe — no Codex, since it was not requested. Chat gets the Mermaid flow diagram and its short annotations, the risk class, any UI screenshots, then the verdict and every finding. Handoff and restore run as normal, because this is still your branch.
+**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, the two Claude critics, plus Pass N (diagram), Pass K (risk), Step 4.5's vocabulary resolution, and Step 4.6's UI presence check — no Codex, since it was not requested. Chat gets the Mermaid flow diagram and its short annotations, the risk class, a one-line note if the change touches UI, then the verdict and every finding. Handoff and restore run as normal, because this is still your branch.
 
 **"review PR 42"** → `--pr 42`. Step 1.5 resolves it, fetches `pull/42/head`, and builds a detached worktree; Step 3 is skipped; the two critics, Pass N, and Pass K read the PR's diff and open files from the PR's tree, and — because no `/ship` of yours will ever review this PR — Pass R runs gstack `/review` report-only in that worktree, adding `performance`, `data-migration`, `api-contract`, and Red Team coverage (add `--codex` for this skill's own cross-model pass too). Verdict prints as `APPROVE-WITH-COMMENTS` with `review ✓n` and `risk med` in the pass line, bucket 2 admits only standards citations, no handoff, and Step 9 deletes the worktree. Your own uncommitted work is untouched throughout — and nothing is posted to the PR.
 
-**"review PR 42"** where the PR adds a checkout screen and no screenshot → Step 4.6 finds frontend files, `PR_HAS_IMAGE: no`, and a `.claude/launch.json` in the PR head; it launches the app, screenshots the changed route, and `SendUserFile`s the PNG under the narrative. Had the author embedded a mock in the PR body, `PR_HAS_IMAGE: yes` and the line reads `UI preview — not shown: author already supplied an image`.
+**"review PR 42"** where the PR adds a checkout screen → Step 4.6 finds frontend files and prints `UI preview — not shown: app launching removed — fresh-review does not launch a review tree (N frontend file(s) changed); open the branch yourself to view the UI`. It does not launch the PR's app — that would run the author's code on your host — and it does not tell you to "just check it out locally," because a locally-checked-out PR is no more trusted than the fetched one. To view the UI, open the branch in an environment where you have judged it safe to run.
 
 **"explain PR 42 for the standup"** with no `.lattice/standards/ddd-principles.md` → identical run, `VOCAB: atom-defaults`. The diagram and its annotations use generic domain terms and nouns lifted from the code's own naming, the report says so in one line, and the review still runs in full.
 

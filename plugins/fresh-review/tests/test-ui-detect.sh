@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # test-ui-detect.sh — fixtures for fr-ui-detect.sh, Step 4.6's gate.
 #
+# fresh-review NEVER launches a review tree (launching was removed in v0.9.0
+# because a review tree may be untrusted and provenance is not mechanically
+# decidable). So UI_ELIGIBLE is always `no`; the script only classifies WHY.
+#
 # The traps this exists to catch, in order of how quietly they fail:
 #
-# 1. Eligibility firing outside pr mode. A UI capture in the lean default run
-#    would add latency to every pre-commit review that nobody asked for.
-# 2. Synthesizing a launch.json into a tree under review. On your own branch
-#    (REVIEW_SCOPE != pr) a bare dev script must be REFUSED, not turned into a
-#    launch recipe — writing one injects a file into the very diff being reviewed.
-# 3. Missing that the author already supplied an image. An image asset in the
-#    diff (a committed mock) must set PR_HAS_IMAGE and make the change ineligible;
-#    generating a screenshot on top of the author's own is wasted work.
-# 4. Treating a bare .ts/.js as frontend. Backend TypeScript is not a UI change;
+# 0. Ever launching a review tree. UI_ELIGIBLE must stay `no` even when a
+#    committed .claude/launch.json is present, in EVERY scope — pr-remote AND a
+#    locally-checked-out branch (REVIEW_SCOPE=branch). A `yes` here is the RCE
+#    the feature was cut to prevent: the orchestrator would preview_start an
+#    untrusted app on the reviewer's host.
+# 1. Eligibility firing outside pr mode. UI context belongs with the narrative
+#    reader; the lean default run must not carry it.
+# 2. Treating a bare .ts/.js as frontend. Backend TypeScript is not a UI change;
 #    only component frameworks, styles, or files under a UI dir count.
 
 set -uo pipefail
@@ -43,8 +46,6 @@ detect() { # name-status-lines | with state kv pairs after --
     echo "MODE='${MODE:-pr}'"
     echo "REVIEW_SCOPE='${REVIEW_SCOPE:-pr}'"
     echo "SOURCE_ROOT='$run/src'"
-    echo "HAS_GH='0'"
-    [ -n "${PR_NUMBER:-}" ] && echo "PR_NUMBER='$PR_NUMBER'"
   } > "$run/state.env"
   # optional filesystem setup callback
   [ -n "${SETUP:-}" ] && eval "$SETUP"
@@ -61,34 +62,29 @@ OUT="$(detect 'M\tsrc/api/orders.ts\nM\tREADME.md\n')"
 want "$OUT" UI_ELIGIBLE no "backend-only change"
 want "$OUT" FRONTEND_HITS 0 "backend-only change"
 
-# --- 3. frontend + launch.json --> eligible ----------------------------------
-OUT="$(SETUP='mkdir -p "$run/src/.claude"; echo "{}" > "$run/src/.claude/launch.json"' \
-       detect 'M\tapp/components/Nav.tsx\n')"
-want "$OUT" UI_ELIGIBLE yes "frontend + committed launch.json"
-want "$OUT" LAUNCH_KIND launch.json "frontend + committed launch.json"
-
-# --- 4. pr-remote + dev script, no launch.json --> eligible (worktree is safe) -
-OUT="$(SETUP='printf "{\"scripts\":{\"dev\":\"vite\"}}" > "$run/src/package.json"' \
-       REVIEW_SCOPE=pr detect 'M\tsrc/pages/Checkout.tsx\n')"
-want "$OUT" UI_ELIGIBLE yes "pr-remote dev script"
-want "$OUT" LAUNCH_KIND "script:dev" "pr-remote dev script"
-
-# --- 5. pr-local + dev script, no launch.json --> REFUSED (would edit checkout) -
-OUT="$(SETUP='printf "{\"scripts\":{\"dev\":\"vite\"}}" > "$run/src/package.json"' \
-       REVIEW_SCOPE=branch detect 'M\tsrc/pages/Checkout.tsx\n')"
-want "$OUT" UI_ELIGIBLE no "pr-local dev script only"
+# --- 3. frontend change --> ineligible, launching removed --------------------
+OUT="$(detect 'M\tapp/components/Nav.tsx\n')"
+want "$OUT" UI_ELIGIBLE no "frontend change"
 case "$(key "$OUT" UI_REASON)" in
-  *"would edit your checkout"*) ok "pr-local refusal names the mutation risk" ;;
-  *) bad "pr-local refusal" "a 'would edit your checkout' reason" "$(key "$OUT" UI_REASON)" ;;
+  *"app launching removed"*) ok "frontend change names the launching-removed reason" ;;
+  *) bad "frontend reason" "an 'app launching removed' reason" "$(key "$OUT" UI_REASON)" ;;
 esac
 
-# --- 6. image asset in the diff --> author already supplied a picture ---------
-OUT="$(SETUP='mkdir -p "$run/src/.claude"; echo "{}" > "$run/src/.claude/launch.json"' \
-       detect 'A\tsrc/pages/Login.tsx\nA\tdocs/mock-login.png\n')"
-want "$OUT" PR_HAS_IMAGE yes "image asset committed"
-want "$OUT" UI_ELIGIBLE no "image asset committed"
+# --- 4. RCE guard: a committed launch.json NEVER makes a tree eligible --------
+# pr-remote (untrusted PR head) AND a locally-checked-out branch both hold this
+# invariant. A `yes` here is the exact code-execution the feature was cut for.
+for scope in pr branch; do
+  OUT="$(SETUP='mkdir -p "$run/src/.claude"; echo "{}" > "$run/src/.claude/launch.json"' \
+         REVIEW_SCOPE=$scope detect 'M\tsrc/pages/Checkout.tsx\n')"
+  want "$OUT" UI_ELIGIBLE no "launch.json present, scope=$scope — never launched"
+done
 
-# --- 7. bare .ts under a non-UI dir is not a frontend hit ---------------------
+# --- 5. dev script present --> still never eligible ---------------------------
+OUT="$(SETUP='printf "{\"scripts\":{\"dev\":\"vite\"}}" > "$run/src/package.json"' \
+       REVIEW_SCOPE=branch detect 'M\tsrc/pages/Checkout.tsx\n')"
+want "$OUT" UI_ELIGIBLE no "dev script present — never launched"
+
+# --- 6. bare .ts under a non-UI dir is not a frontend hit --------------------
 OUT="$(detect 'M\tsrc/lib/parse.ts\n')"
 want "$OUT" FRONTEND_HITS 0 "bare backend .ts"
 
