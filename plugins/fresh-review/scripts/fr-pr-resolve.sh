@@ -123,7 +123,14 @@ case "$REPORT_DIR" in
   *)              PR_WT="${TMPDIR:-/tmp}/fresh-review-prwt-$RUN_ID" ;;
 esac
 rm -rf "$PR_WT"
-if ! git worktree add --quiet --detach "$PR_WT" "$PR_HEAD" 2>"$RUN_DIR/raw/pr-worktree.err"; then
+# `git worktree add` runs the `post-checkout` hook. A relative core.hooksPath
+# resolves against the invoking worktree, so a reviewer whose checkout points
+# core.hooksPath at a tracked in-repo dir (a `.githooks`, husky) would have that
+# hook fire as a side effect of materializing the PR head — running code on their
+# host before the diff is even read. `-c core.hooksPath=/dev/null` disables hooks
+# for this one invocation only — it neither touches the repo config nor persists
+# into the new worktree.
+if ! git -c core.hooksPath=/dev/null worktree add --quiet --detach "$PR_WT" "$PR_HEAD" 2>"$RUN_DIR/raw/pr-worktree.err"; then
   # A partial `git worktree add` can register the admin entry AND leave the
   # directory on disk, so `git worktree prune` (which only reaps entries whose
   # directory is gone) will not remove it — and PR_WT was never persisted, so

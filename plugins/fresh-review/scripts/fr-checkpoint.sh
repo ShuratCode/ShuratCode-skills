@@ -35,7 +35,11 @@ else
   # missing var aborts restore under `set -u` and the user's staging is lost.
   persist failed "$(git rev-parse HEAD)"
   git add -A
-  if git commit --no-verify -m "WIP: fresh-review checkpoint (will reset)" >/dev/null 2>&1; then
+  # --no-verify only skips pre-commit and commit-msg; `prepare-commit-msg` still
+  # runs. When a locally-checked-out untrusted branch is under review and its tree
+  # sets core.hooksPath to a tracked in-repo dir, that hook would execute here.
+  # `-c core.hooksPath=/dev/null` disables all hooks for this one commit.
+  if git -c core.hooksPath=/dev/null commit --no-verify -m "WIP: fresh-review checkpoint (will reset)" >/dev/null 2>&1; then
     CHECKPOINT=committed
   else
     CHECKPOINT=failed
