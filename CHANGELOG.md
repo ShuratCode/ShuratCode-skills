@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.16.0 — 2026-09-16
+
+### New plugin `second-brain` 0.1.0: the vault skills, ported to Notion
+
+Shaked moved his Obsidian second-brain vault to Notion (workspace "Second Brain", with an **Agent
+Handbook** page that replaces `AGENTS.md` as the single source of truth). This ports the `vault-tools`
+operations to the Notion model. The old `vault-tools` plugin stays as-is for the frozen Obsidian repo.
+
+Eight `brain-*` skills, each with a desktop-executable command wrapper. Every skill starts the same
+way: a **workspace guard** (`notion-fetch id:self`; refuse if the account is the `@vi.co` work
+workspace) and a **live fetch of the Agent Handbook**, which wins over anything in the skill. Shared
+IDs and guardrails live in `references/brain-context.md`.
+
+- **`brain-ingest`** — article/PDF/source → Literature row + atomic Zettels; sweep the `Awaiting
+  ingest` views or a pointed source. (ports `vault-ingest`)
+- **`brain-query`** — answer from the workspace with row citations; keyword search only (no semantic
+  search on the Free plan); says so when there's no confident answer. (ports `vault-query`)
+- **`brain-lint`** — health report of duplicates, orphans, stale content, and pipeline drift; proposes,
+  never edits. (ports `vault-lint`)
+- **`brain-book-note`** — bibliographic metadata on Books rows only; never reading or curation. (ports
+  `vault-book-note`)
+- **`brain-book-digest`** — a read book's `## Notes` → Literature + Zettels; hard-stops on empty notes.
+  (ports `vault-book-digest`)
+- **`brain-podcast`** — capture + source-ladder ingest; hard-stops on show-notes-only. (ports
+  `vault-podcast`)
+- **`brain-watch`** — NEW. Video/talk twin of `brain-podcast` for the 🎥 Watch database. Watch is not
+  yet in the Handbook, so the skill proposes an amendment rather than editing it.
+- **`brain-sweep`** — NEW. Weekly pipeline heartbeat replacing the Free-plan's missing automations:
+  reads the ingest queues, drafts takeaways, and hands off to the ingest skills; never writes the wiki
+  itself.
+
+`vault-route` was intentionally not ported — Notion's Capture (Web Clipper writes straight to Reading)
+replaces the inbox-sweep. Registered in the marketplace and added to the `everything` meta-plugin
+(0.4.0 → 0.5.0).
+
 ## 0.15.2 — 2026-09-15
 
 ### `fresh-review` 0.9.1 → 0.9.2: disable git hooks for the review's own git operations
