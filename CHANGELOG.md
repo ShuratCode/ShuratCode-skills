@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.17.0 — 2026-09-17
+
+### `fresh-review` 0.9.2 → 0.10.0: PR-context triage, static-analysis follow-through, and a lean PR output
+
+Three changes, all keyed on the review subject having a PR — resolved by number/URL in pr-remote, and
+now auto-discovered from the current branch's open PR in the other modes. None of them relaxes the
+isolation the skill is built on: the critics and the narrator still read only the packet.
+
+- **Static-analysis follow-through (Pass W).** When the PR gate posts findings from a static-analysis
+  tool (Wiz, Snyk, SonarCloud, CodeQL, Semgrep, Trivy, and similar), a new non-isolated pass checks
+  each one against the code: a finding counts as handled if it was **fixed in the diff**, **suppressed
+  in code** (an inline ignore directive), or **dismissed in the PR thread** (a human reply or the tool
+  marking it resolved). Anything still present with none of those becomes a **blocker** under a new
+  static-analysis floor in triage — it cannot be waved to noise on judgment alone. Chat gains one line:
+  `static analysis (wiz): N raised — X fixed, Y suppressed, Z dismissed, W unaddressed`.
+- **PR context feeds triage, not the passes.** A new Step 4.7 (`fr-pr-context.sh`) gathers the PR
+  description, human discussion, and bot findings into a producer-only `pr-context/` directory. Triage
+  uses it to avoid re-raising a finding the thread already dismissed and to let a "by design" cite a
+  decision recorded on the PR. The isolated passes are forbidden to read it — `pr-context/**` is on the
+  isolation contract's forbidden list, and a narrator that reads it is discarded, not downgraded.
+- **Lean PR-mode chat output.** PR mode now prints only what was asked for: the **rendered graph** (no
+  longer the graph *and* its Mermaid source — the fence is a fallback for when `mmdc` is unavailable),
+  a **one-paragraph summary**, the **verdict**, and the **comments**. The risk-factor breakdown, the
+  full narrative sections, the pass inventory, the UI-preview note, and the structural-coverage
+  boilerplate move to `report.md`; a single `⚠ reduced coverage` line stays in chat only when a pass
+  actually failed or was unavailable.
+
+Run-log schema bumped to `schema:8` (adds `pr_context`, `static_analysis`, and an optional
+`static-analysis` pass). New regression test `tests/test-pr-context.sh`.
+
 ## 0.16.0 — 2026-09-16
 
 ### New plugin `second-brain` 0.1.0: the vault skills, ported to Notion
