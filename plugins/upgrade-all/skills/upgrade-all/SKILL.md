@@ -2,11 +2,11 @@
 name: upgrade-all
 description: >
   Run all routine local upgrades in one flow: Homebrew formulas and casks with cleanup,
-  gstack upgrade, and Claude Code plugin updates for lattice, aws-core, sparkpilot, and the
-  ShuratCode-skills plugins (everything, fresh-review, restaurant-search, upgrade-all). Use
-  this whenever the user asks to "upgrade all", "full upgrade run", "upgrade brew gstack
-  lattice", "maintenance upgrade", or to upgrade brew, gstack, lattice and the aws plugin
-  together.
+  gstack upgrade, and Claude Code plugin updates for every installed plugin (discovered from
+  `claude plugins list`, so the set is never stale). Also reports plugins that are available
+  in your marketplace but not installed yet. Use this whenever the user asks to "upgrade
+  all", "full upgrade run", "upgrade brew gstack lattice", "maintenance upgrade", or to
+  upgrade brew, gstack, and the Claude Code plugins together.
 allowed-tools:
   - Bash
   - Read
@@ -24,19 +24,24 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-all.sh"
 ```
 
 The script runs, in order: Homebrew (update/upgrade/cask/cleanup/autoremove), gstack
-(inline non-interactive git upgrade + migrations), and the `claude plugins` updates for
-lattice, aws-core, sparkpilot, and the four ShuratCode-skills plugins (`everything`,
-`fresh-review`, `restaurant-search`, `upgrade-all` — self last). It prints exactly one
-`=== UPGRADE-ALL SUMMARY ===` block and writes verbose per-step output to a log file.
+(inline non-interactive git upgrade + migrations), and the `claude plugins` updates. The
+plugin step is a discovery loop: it enumerates every installed plugin from `claude plugins
+list` and updates each (`upgrade-all` self last), so no plugin is ever missed because a
+hardcoded list went stale. It then reports any plugin that is available in this plugin's own
+marketplace but not installed yet. It prints exactly one `=== UPGRADE-ALL SUMMARY ===` block
+and writes verbose per-step output to a log file.
 
 ## 2) Report the result
 
 Read only the SUMMARY block from the script's stdout. Each line is
-`component: STATUS — detail`, where STATUS is `UPGRADED`, `CURRENT`, `SKIPPED`, or
-`FAILED`. Relay it to the user as a concise summary covering brew, gstack, lattice,
-aws-core, sparkpilot, and the ShuratCode-skills plugins.
+`component: STATUS — detail`, where STATUS is `UPGRADED`, `CURRENT`, `SKIPPED`, `FAILED`, or
+`AVAILABLE`. Relay it to the user as a concise summary covering brew, gstack, and each
+Claude Code plugin the loop touched.
 
 - Do **not** re-run the individual upgrade commands — the script already did everything.
+- An `AVAILABLE` line is a plugin published in the marketplace but not installed yet; the
+  detail carries the `claude plugins install …` command. Surface these so the user can
+  decide to install; do **not** install them automatically.
 - If any line is `FAILED`, the script appends the tail of the log and a `LOG:` path.
   Mention the failure and, only if the user wants to dig in, read that log file with the
   Read tool.
