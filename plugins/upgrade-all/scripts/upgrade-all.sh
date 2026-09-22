@@ -8,7 +8,8 @@
 # Output contract (stdout):
 #   A single block delimited by "=== UPGRADE-ALL SUMMARY ===" / "=== END SUMMARY ==="
 #   with one "key: STATUS — detail" line per component, plus a LOG: path line.
-#   STATUS is one of: UPGRADED | CURRENT | SKIPPED | FAILED
+#   STATUS is one of: UPGRADED | CURRENT | SKIPPED | FAILED | AVAILABLE
+#   (AVAILABLE marks a marketplace plugin that is not installed yet.)
 
 set -u
 
@@ -108,50 +109,89 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3-5) Claude plugins (lattice, aws-core, sparkpilot, ShuratCode-skills)
+# 3) Claude plugins
 #
-# `upgrade-all` updates itself last. Doing so is safe because a new version
+# Update loop: enumerate whatever `claude plugins list` reports and update each
+# one, so the set is never a stale hardcoded list — a newly installed plugin is
+# picked up automatically. `upgrade-all` updates itself last: a new version
 # installs into a sibling directory (cache/<mkt>/<plugin>/<version>/) rather
 # than overwriting the running script, but keeping it last avoids any question
 # about bash re-reading a file mid-execution.
+#
+# Then report plugins that are available but not installed in this plugin's own
+# marketplace, so a newly published one surfaces instead of staying invisible.
 # ---------------------------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
   logrun "claude plugins marketplace update" claude plugins marketplace update || true
-  PLUGINS=$(claude plugins list 2>/dev/null)
-  upgrade_plugin() { # display  qualified  bare
-    local name="$1" qualified="$2" bare="$3" ref=""
-    if printf '%s' "$PLUGINS" | grep -q "$qualified"; then
-      ref="$qualified"
-    elif printf '%s' "$PLUGINS" | grep -q "$bare"; then
-      ref="$bare"
-    fi
-    if [ -z "$ref" ]; then
-      add "$name" "SKIPPED" "not installed"
-      return
-    fi
-    local out rc
-    out=$(claude plugins update "$ref" 2>&1); rc=$?
-    echo "### claude plugins update $ref" >> "$LOG"
+
+  # Installed ids as `name@marketplace`, one per line. Text parse keeps the
+  # update loop working even where jq is absent.
+  INSTALLED_IDS=$(claude plugins list 2>/dev/null | grep '@' | awk '{print $NF}')
+  SELF_ID=$(printf '%s\n' "$INSTALLED_IDS" | grep -E '^upgrade-all@' | head -1)
+
+  update_plugin() { # id
+    local id="$1" name="${1%%@*}" out rc
+    echo "### claude plugins update $id" >> "$LOG"
+    out=$(claude plugins update "$id" 2>&1); rc=$?
     printf '%s\n' "$out" >> "$LOG"
     if [ "$rc" -ne 0 ]; then
-      add "$name" "FAILED" "update $ref failed"
+      add "$name" "FAILED" "update $id failed"
     elif printf '%s' "$out" | grep -qiE "already|up to date|up-to-date|no update"; then
-      add "$name" "CURRENT" "$ref"
+      add "$name" "CURRENT" "$id"
     else
-      add "$name" "UPGRADED" "$ref"
+      add "$name" "UPGRADED" "$id"
     fi
   }
-  upgrade_plugin "lattice"    "lattice@lattice"                  "lattice"
-  upgrade_plugin "aws-core"   "aws-core@claude-plugins-official" "aws-core"
-  upgrade_plugin "sparkpilot" "sparkpilot@vi-technologies"       "sparkpilot"
-  upgrade_plugin "everything"        "everything@ShuratCode-skills"        "everything"
-  upgrade_plugin "fresh-review"      "fresh-review@ShuratCode-skills"      "fresh-review"
-  upgrade_plugin "restaurant-search" "restaurant-search@ShuratCode-skills" "restaurant-search"
-  upgrade_plugin "upgrade-all"       "upgrade-all@ShuratCode-skills"       "upgrade-all"
+
+  if [ -z "$INSTALLED_IDS" ]; then
+    add "claude-plugins" "SKIPPED" "no installed plugins found"
+  else
+    # Every plugin except self in listed order, then self last. Process
+    # substitution (not a pipe) keeps `add` in the current shell so SUMMARY
+    # survives the loop.
+    while IFS= read -r id; do
+      [ -z "$id" ] && continue
+      [ "$id" = "$SELF_ID" ] && continue
+      update_plugin "$id"
+    done < <(printf '%s\n' "$INSTALLED_IDS")
+    [ -n "$SELF_ID" ] && update_plugin "$SELF_ID"
+  fi
+
+  # ---- available-but-not-installed, scoped to this plugin's marketplace -----
+  HOME_MKT="${SELF_ID#*@}"
+  [ "$HOME_MKT" = "$SELF_ID" ] && HOME_MKT=""   # no '@' in SELF_ID means no match
+  if [ -z "$HOME_MKT" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    # .../plugins/cache/<marketplace>/<plugin>/<version>
+    HOME_MKT=$(printf '%s' "$CLAUDE_PLUGIN_ROOT" | awk -F'/cache/' 'NF>1{split($2,a,"/"); print a[1]}')
+  fi
+
+  if [ -z "$HOME_MKT" ]; then
+    add "new-plugins" "SKIPPED" "could not determine home marketplace"
+  elif ! command -v jq >/dev/null 2>&1; then
+    add "new-plugins" "SKIPPED" "jq not installed (needed to diff available plugins)"
+  else
+    AVAIL_JSON=$(claude plugins list --available --json 2>/dev/null)
+    if [ -z "$AVAIL_JSON" ]; then
+      add "new-plugins" "SKIPPED" "could not query available plugins"
+    else
+      NEW_PLUGINS=$(printf '%s' "$AVAIL_JSON" | jq -r --arg mkt "$HOME_MKT" '
+        (.installed | map(.id)) as $inst
+        | .available[]
+        | select(.marketplaceName == $mkt)
+        | select(.pluginId as $p | ($inst | index($p)) | not)
+        | .pluginId' 2>/dev/null)
+      if [ -z "$NEW_PLUGINS" ]; then
+        add "new-plugins" "CURRENT" "none available in $HOME_MKT"
+      else
+        while IFS= read -r pid; do
+          [ -z "$pid" ] && continue
+          add "${pid%%@*}" "AVAILABLE" "in $HOME_MKT, not installed — claude plugins install $pid"
+        done < <(printf '%s\n' "$NEW_PLUGINS")
+      fi
+    fi
+  fi
 else
-  for _p in lattice aws-core sparkpilot everything fresh-review restaurant-search upgrade-all; do
-    add "$_p" "SKIPPED" "claude CLI not found"
-  done
+  add "claude-plugins" "SKIPPED" "claude CLI not found"
 fi
 
 # ---------------------------------------------------------------------------

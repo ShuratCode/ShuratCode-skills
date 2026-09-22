@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.18.0 — 2026-09-22
+
+### `upgrade-all` 0.6.0: discover installed plugins, surface uninstalled ones
+
+The Claude-plugins step no longer works off a hardcoded list of seven plugins. That list had
+already gone stale — `second-brain`, `pull-all`, `vault-tools`, `worktree-cleanup`, and others
+were installed but never updated because they were not named.
+
+- **Discovery loop.** The step now enumerates every installed plugin from `claude plugins list`
+  and updates each one (`upgrade-all` updates itself last). The set can never go stale again.
+- **Uninstalled plugins surface.** After updating, the script diffs `claude plugins list
+  --available` against what is installed and reports any plugin available in its own marketplace
+  but not installed yet — as a new `AVAILABLE` summary line carrying the `claude plugins install`
+  command. A newly published plugin now shows up instead of staying invisible. The report is
+  scoped to this plugin's home marketplace, so the third-party catalog does not flood the summary,
+  and needs `jq` (it degrades to a `SKIPPED` line when `jq` is absent).
+
 ## 0.17.0 — 2026-09-17
 
 ### `fresh-review` 0.9.2 → 0.10.0: PR-context triage, static-analysis follow-through, and a lean PR output
