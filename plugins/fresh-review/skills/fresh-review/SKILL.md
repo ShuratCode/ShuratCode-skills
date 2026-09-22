@@ -61,8 +61,10 @@ Two output shapes, one machine. Every mode fans out the same critic passes again
 | The user's words | Preflight flags | Subject of the review | Chat output |
 |---|---|---|---|
 | "fresh review", "review before I commit", "what did I miss" | *(none)* | your branch | verdict + findings |
-| "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **diagram narrative** + **risk class** + verdict + findings (+ a UI-touch note) |
-| "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **diagram narrative** + **risk class** + verdict + findings (+ a UI-touch note) |
+| "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **the graph** + **one-paragraph summary** + verdict + findings |
+| "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **the graph** + **one-paragraph summary** + verdict + findings |
+
+The chat output is deliberately lean — the graph (rendered, not its source), one short paragraph, the verdict, the comments. The risk class, the risk factor breakdown, the full narrative sections, the pass inventory, and the coverage notes are written to `report.md`, not printed. Whenever the review subject has an associated PR (always in pr-remote; auto-discovered on your own branch), the run also gathers PR context (Step 4.7) and, if the PR carried static-analysis findings, adds one static-analysis summary line and verifies each finding was handled (Pass W).
 
 Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do not re-derive it later.
 
@@ -113,6 +115,7 @@ DDD_DOC=".lattice/standards/ddd-principles.md"   # narrative vocabulary; resolve
 - **Codex is opt-in.** When requested (`--codex`, see "The Codex opt-in") it runs as a full pass, in the background, concurrent with the others. When not requested it does not run at all, and the run has two critic passes rather than three. Rationale for the background invocation is in Pass C.
 - **The diagram narrative and risk class are `pr` mode only.** Pass N draws the changed flow as a Mermaid diagram (rendered to PNG via `mmdc` when it is on `PATH`, otherwise printed as a fenced block); Pass K classifies the change `low`/`med`/`high`. Neither runs in the default pre-commit mode, which stays lean. The mechanical `RISK` (`normal`/`high`) from `fr-packet.sh` is unchanged and still gates `/cso` depth in every mode — it is a separate signal from Pass K's class.
 - **UI presence check is `pr`-mode only and never launches anything.** `fr-ui-detect.sh` reports whether the diff touches frontend UI and Step 4.6 prints one `UI preview — not shown: <reason>` line. It does **not** launch an app or take screenshots: a review tree may hold untrusted code and provenance is not mechanically decidable, so auto-launching it is an RCE risk (Step 4.6, "Why UI preview does not launch"). It never blocks the verdict.
+- **PR context and static-analysis verification are producer-side and run whenever a PR exists.** `fr-pr-context.sh` (Step 4.7) gathers the PR's description, human discussion, and any static-analysis bot findings (Wiz, Snyk, SonarCloud, CodeQL, …) into `$RUN_DIR/pr-context/` — for triage and Pass W only, never for the isolated passes. When the PR carried analyzer findings (`SA_PRESENT: 1`), Pass W (Step 5) verifies each was fixed, suppressed, or dismissed, and an unaddressed one becomes a blocker under the static-analysis floor (Step 7). Both need `gh`; with no PR or no `gh` they self-skip cleanly and the run is unchanged.
 
 ## Why gstack's `/review` is not a pass here
 
@@ -141,16 +144,16 @@ The reverse redundancy — ship re-running what *this* skill already did — is 
 
 Two audiences, two artifacts. Do not confuse them.
 
-- **Chat is for the human.** It gets the verdict on the first line and *every* finding from *every* pass, merged and triaged — plus, in `pr` mode, the diagram narrative in full above it, the risk class, and a one-line note if the change touches UI. It is never a pointer to a file. "Full report at `<path>`" is not an acceptable substitute for the findings themselves, and it is not one for the narrative either: in `pr` mode the narrative *is* what the user asked for.
-- **Disk is for the agents and for later analysis.** Raw pass reports, the diff packet, and the run log live in the run directory. Nothing there is required reading for the user.
+- **Chat is for the human, and it is kept lean.** It gets the verdict on its own line and *every* finding from *every* pass, merged and triaged — plus, in `pr` mode and above the verdict, **the graph and one short paragraph** (the summary), and, when the PR carried static-analysis findings, a one-line static-analysis summary. That is the whole of it: the graph, the one-paragraph summary, the verdict, the comments. It is never a pointer to a file — "Full report at `<path>`" is not an acceptable substitute for the findings or the summary.
+- **Disk carries the long form.** The full narrative sections, the risk rationale and factor breakdown, the detailed pass inventory, the UI-preview note, the coverage boilerplate, raw pass reports, the diff packet, and the run log all live in the run directory (`report.md` and `raw/`). Nothing there is required reading for the user — it is where the detail that used to crowd the chat now lives.
 - **Nothing is for GitHub.** No mode posts, comments, or edits a PR. See "What this skill does NOT do".
 
 ## Token discipline
 
 Four invariants. Every step below is built around them; violating one silently makes the run cost several times what it should.
 
-1. **The orchestrator never loads the diff** — nor the DDD principles document. `fr-packet.sh` classifies risk with `grep -c` over the patch and prints only counts; `fr-ddd-vocab.sh` extracts the vocabulary sections into a brief and prints only its line count. A full refiner output runs to a thousand lines, and the orchestrator's job is to hand it to Pass N by path, not to read it.
-2. **Reviewers read the packet, not git.** The diff is materialized once (Step 4) and every pass is handed the same file paths. No pass re-derives scope, and no pass runs `git diff` — which also guarantees their findings are comparable.
+1. **The orchestrator never loads the diff** — nor the DDD principles document, nor the PR's own content beyond what triage needs. `fr-packet.sh` classifies risk with `grep -c` over the patch and prints only counts; `fr-ddd-vocab.sh` extracts the vocabulary sections into a brief and prints only its line count; `fr-pr-context.sh` writes the PR description and discussion to disk and prints only counts (`DISCUSSION_LINES` among them). The one producer-side read is triage's: `body.md` always, `discussion.md` bounded by its line count (skim when large). The static-analysis material is never read by the orchestrator at all — it is handed to Pass W by path.
+2. **Reviewers read the packet, not git — and never the PR context.** The diff is materialized once (Step 4) and every isolated pass is handed the same file paths. No isolated pass re-derives scope, runs `git diff`, or opens `pr-context/`. Pass W is the sole exception on both counts: it reads `pr-context/` because verifying analyzer findings is its whole job, and it is not a critic.
 3. **Passes return compact findings; prose goes to disk.** This is the largest saving by far. `/cso` alone emits thirteen numbered phases of narrative; the compact block is a few hundred tokens. Each pass writes its full report to `$RUN_DIR/raw/` and returns only the fixed-format block in Step 5.
 4. **Raw reports are not read back.** Triage runs on the compact blocks. Open a raw report only to disambiguate one specific finding, and read only that finding's section.
 
@@ -158,7 +161,7 @@ The same principle governs the shell work: every mechanical step is a script in 
 
 ## Workflow
 
-Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode — Pass N (narrative) and Pass K (risk) in `pr` mode, and Pass R (the review army) additionally in pr-remote. Nothing else branches on mode.
+Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
@@ -263,7 +266,7 @@ Two resolved outputs to state out loud:
 - `HEAD_DRIFT: yes` — the PR was pushed to between the `gh` call and the fetch. Not an error, but the report must name the commit actually reviewed, which is `PR_HEAD`, not what `gh` reported.
 - `PR_STATE` — `MERGED` and `CLOSED` are reviewable (narrating a merged PR is a legitimate use). Just say which, so nobody acts on a `REQUEST-CHANGES` for a PR that landed last week.
 
-**The PR title is fetched and deliberately withheld from every pass.** It is in `$RUN_DIR/pr.json`, and it goes in the Step 8 header for the human to read — but never into the packet or a subagent prompt. The title is the author's claim about the change; Pass N's entire value is deriving the change from the code independently, and a divergence between the two is a finding rather than an input. The body is never fetched at all.
+**The PR title is fetched and deliberately withheld from every isolated pass.** It is in `$RUN_DIR/pr.json`, and it goes in the Step 8 header for the human to read — but never into the packet or an isolated subagent prompt. The title is the author's claim about the change; Pass N's entire value is deriving the change from the code independently, and a divergence between the two is a finding rather than an input. The body, the human discussion, and any static-analysis bot findings are fetched too — but by **Step 4.7** (`fr-pr-context.sh`) into `$RUN_DIR/pr-context/`, which is producer-only: it feeds triage and the static-analysis verification (Pass W), and is on every isolated pass's forbidden-reads list. The critics and the narrator never see it; that separation is what the "Keep passes blind" design turns on.
 
 ### Step 2: State the scope
 
@@ -354,9 +357,32 @@ Earlier drafts launched the app to screenshot the changed routes. That was remov
 
 So the skill does not launch, in any mode. To view the UI, open the branch yourself in your own environment where you have judged it safe to run. Do not reintroduce a launch path gated on scope, worktree disposability, or author metadata — none of those is a trust boundary.
 
+### Step 4.7: Gather PR context (whenever a PR exists)
+
+Run this whenever a PR is discoverable — in **every** mode, not only `pr` mode. This is the step that reads the PR's description, its human discussion, and any static-analysis bot findings, into `$RUN_DIR/pr-context/` **for the producer side only**. It is the one deliberate exception to the "reviewers read the packet, not git" rule, and it is safe because nothing it writes ever reaches an isolated pass (see the forbidden-reads addition in Step 5).
+
+```bash
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-pr-context.sh" "$RUN_DIR"
+```
+
+`PR_CONTEXT` comes back as exactly one of:
+
+- `present` → a PR was found (already resolved in pr-remote, or discovered from the current branch's open PR in the other modes). `body.md`, `discussion.md`, and `sa-findings.md` are written. Read the printed keys, not the files — the files are for Step 7 (triage) and Pass W, handed on by path.
+- `none` → no PR for this branch. This is the normal default pre-commit case. Feature 1 and 2 simply do not apply; say nothing about them and proceed.
+- `unavailable` → `gh` is missing or a call failed (`REASON` says which). State it once — PR discussion and static-analysis verification are skipped this run — and proceed. It is never a blocker.
+
+Two keys drive later steps:
+
+- `SA_PRESENT: yes` with `SA_TOOL: <names>` → the PR carries findings from a static-analysis tool (Wiz, Snyk, SonarCloud, CodeQL, …). **Pass W runs in Step 5** to verify each was fixed, suppressed, or dismissed. `SA_SIGNAL` is the count of tool comments/threads/checks gathered.
+- `SA_PRESENT: no` → no analyzer findings on the PR (or no PR). Pass W does not run; do not mention it as a gap — there was nothing to verify.
+
+Token discipline is preserved exactly as everywhere else: the script prints only counts and the detected tool names. It never echoes a comment or a description back through stdout. `DISCUSSION_LINES` tells you how big `discussion.md` is, so Step 7 can decide whether to read it whole or skim it.
+
 ### Step 5: Fan out all reviewers (one parallel batch)
 
-Launch the Claude subagents **in a single message** — two in `review` mode (Pass A, Pass B), four in `pr` mode (adds Pass N narrative and Pass K risk), and five in pr-remote when `HAS_GSTACK: 1` (adds Pass R, the review army) — **and, only when `CODEX_REQUESTED: 1`, the Codex background command in the same message.** When Codex was not requested there is no Pass C to launch; the fan-out is Claude-only and everything downstream treats Codex as absent. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N and Pass K are cheap enough that adding them changes wall time by roughly nothing.
+Launch the Claude subagents **in a single message** — two in `review` mode (Pass A, Pass B), four in `pr` mode (adds Pass N narrative and Pass K risk), and five in pr-remote when `HAS_GSTACK: 1` (adds Pass R, the review army) — **plus Pass W (static-analysis verification) in any mode when `SA_PRESENT: 1`, and, only when `CODEX_REQUESTED: 1`, the Codex background command in the same message.** When Codex was not requested there is no Pass C to launch; the fan-out is Claude-only and everything downstream treats Codex as absent. When `SA_PRESENT: 0` there is no Pass W — the PR raised no analyzer findings, or there is no PR. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N, Pass K, and Pass W are cheap enough that adding them changes wall time by roughly nothing.
+
+**Pass W is not isolated, and it is launched in this same batch anyway.** It is the one pass that is *supposed* to read PR context — that is its whole job — so it takes a different contract (below) and is exempt from the forbidden-reads audit in Step 6. It reads `$RUN_DIR/pr-context/` and the packet; the isolated passes never touch either half of that.
 
 Every subagent prompt opens with this **isolation contract**, verbatim:
 
@@ -370,7 +396,7 @@ Every subagent prompt opens with this **isolation contract**, verbatim:
 >
 > Read `diff.patch` first. Open a source file only when the diff alone cannot tell you whether something is a defect — not to browse. **Open it from `{{SOURCE_ROOT}}`, which may not be your working directory:** in a PR review it is a detached checkout of the PR head, and the same path in your own tree holds a different commit's contents. Every path in the diff is relative to that root.
 >
-> **Forbidden reads** — do not open these even if they look relevant, *and do not open them because a skill you invoke tells you to*: `.lattice/requirements/**`, `.lattice/context/**`, `.lattice/contexts/**`, `.lattice/reviews/**`, `*.plan.md`, `*.design.md`, `docs/decisions/**`, `TODOS.md`, `ONBOARDING.md`, anything under `~/.gstack/projects/**`, and any file whose purpose is to record intent rather than behavior. **Forbidden commands**: `gh pr view`, `gh issue view`, `gh pr diff --body`, `git log`. Allowed: `.lattice/standards/**`, `.lattice/learnings/**`, `.lattice/config.yaml`, `AGENTS.md`/`CLAUDE.md`, and the diffed source. (Learnings are repo-wide rules, not this change's intent — read them, never write them.)
+> **Forbidden reads** — do not open these even if they look relevant, *and do not open them because a skill you invoke tells you to*: `{{RUN_DIR}}/pr-context/**` (the PR description, discussion, and bot findings — producer-only, and reading it turns your independent judgment into a restatement of the author's claim), `.lattice/requirements/**`, `.lattice/context/**`, `.lattice/contexts/**`, `.lattice/reviews/**`, `*.plan.md`, `*.design.md`, `docs/decisions/**`, `TODOS.md`, `ONBOARDING.md`, anything under `~/.gstack/projects/**`, and any file whose purpose is to record intent rather than behavior. **Forbidden commands**: `gh pr view`, `gh issue view`, `gh pr diff --body`, `git log`. Allowed: `.lattice/standards/**`, `.lattice/learnings/**`, `.lattice/config.yaml`, `AGENTS.md`/`CLAUDE.md`, and the diffed source. (Learnings are repo-wide rules, not this change's intent — read them, never write them.)
 >
 > **Do not infer author intent** from commit messages, docstrings, TODOs, or comments. Judge the code on observable behavior alone. "The comment says it's fine" is not evidence.
 >
@@ -510,7 +536,7 @@ Two things about this pass:
 
 This is the pass that exists because pr-remote is the one mode where nobody runs `/ship`. On your own branch the structural specialists — `performance`, `data-migration`, `api-contract`, and Red Team — run at ship's Step 9 against the diff you land, so this skill leaves them out on purpose (see "Why gstack's `/review` is not a pass here"). Reviewing someone else's PR you are not the author and not the shipper: ship's Step 8.6 handoff is skipped, no later ship of yours ever touches this diff, and those specialists would otherwise never see it. So pr-remote — and only pr-remote — runs gstack's `/review` as a real pass, report-only, against the PR head.
 
-Skip it when `HAS_GSTACK: 0`: there is no army to run. Say `review ✗ no gstack` in the pass line and keep the structural specialists on the `not covered here` line (Step 8), because in that case the gap is real and nothing in this flow will close it.
+Skip it when `HAS_GSTACK: 0`: there is no army to run. Surface it as a `⚠ reduced coverage` line in chat (Step 8) — `Pass R skipped — no gstack install; performance, data-migration, api-contract, and red-team are uncovered, and no /ship of yours reviews this PR` — because in that case the gap is real and nothing in this flow will close it. The full structural-coverage note still goes to `report.md`.
 
 This pass does **not** take the verbatim isolation contract above — `/review` is built on `git diff` and base detection, so it must be allowed the git it needs. It runs as its own subagent, launched in the same Step 5 message as the others, with this contract instead:
 
@@ -536,6 +562,50 @@ This pass does **not** take the verbatim isolation contract above — `/review` 
 > ```
 
 Its findings merge into triage exactly like the critics', tagged `review`. Codex may run twice on one pr-remote run and that is fine: `/review`'s adversarial Codex is its Red Team, an internal part of the army, and is not this skill's `--codex` Pass C — the two are counted separately and neither gates the other. If `codex` is not installed, `/review`'s adversarial degrades to Claude-only on its own.
+
+**Pass W — static-analysis verification** (any mode; `SA_PRESENT: 1` only)
+
+This is the pass that answers *did the static-analysis tool's findings actually get handled* — for a repo whose PR gate posts Wiz, Snyk, SonarCloud, CodeQL, or similar findings as comments or checks. It is the one pass that **must** read PR context, so it does not take the isolation contract at all — it is handed the gathered findings and told to check each against the code. It runs whenever `SA_PRESENT: 1`, in every mode, launched in the same Step 5 message as the others.
+
+Skip it when `SA_PRESENT: 0` — the PR raised no analyzer findings, or there is no PR, so there is nothing to verify and no field to fill.
+
+Its contract, in place of the isolation contract:
+
+> Static-analysis follow-through check on a pull request. Your one job: for each finding a static-analysis tool raised on this PR, decide whether it was **handled** — and report only the ones that were **not**.
+>
+> **Your inputs:**
+> - `{{RUN_DIR}}/pr-context/sa-findings.md` — the tool findings gathered from the PR (bot comments, inline threads with any human replies, and relevant check runs), each labelled with the tool and, where known, a `path:line`.
+> - `{{RUN_DIR}}/pr-context/review-comments.json` — the raw inline threads, so you can read the full reply chain under any finding.
+> - `{{RUN_DIR}}/packet/diff.patch` — the change under review.
+> - Source files under `{{SOURCE_ROOT}}` — open the flagged file/line to judge whether the issue still exists.
+>
+> **A finding counts as HANDLED — do not report it — when any of these is true:**
+> - **Fixed in the diff.** The flagged code path was changed so the issue no longer applies. Verify against `diff.patch` and the current source, not against the tool's claim.
+> - **Suppressed in code.** An inline ignore directive for that tool sits on or immediately above the flagged line (e.g. a `wiz-ignore` / `nosemgrep` / `# noqa` / `sonar` suppression comment, or the tool's own documented suppression syntax). A suppression with a reason is stronger than a bare one; either counts, but note a bare suppression on a HIGH/CRITICAL finding.
+> - **Dismissed in the thread.** A human (not the bot) replied under the finding accepting or dismissing it, or the tool itself marked it resolved/won't-fix. Quote the dismissing reply's author and gist in NOTES.
+>
+> **A finding is UNADDRESSED — report it — when none of the above holds:** the issue is still present in the code, there is no suppression, and no human dismissed it. Report it at the tool's severity if stated, else your own judgment. Do not soften a still-present HIGH finding to LOW because it is "probably fine."
+>
+> **Do not fix anything, do not post anything, do not edit the PR.** Diagnose only. Non-interactive: `SPAWNED_SESSION: true`; never call AskUserQuestion.
+>
+> **Return format — hard contract.** Write your full reasoning (every finding and its disposition) to `{{RUN_DIR}}/raw/static-analysis.md`. Return to me *only* the block below, unaddressed findings severity-ordered, maximum 25:
+>
+> ```
+> PASS: static-analysis
+> STATUS: ok | partial | failed
+> TOOL: <detected tool name(s), comma-separated>
+> TOTAL: <n>  FIXED: <n>  SUPPRESSED: <n>  DISMISSED: <n>  UNADDRESSED: <n>
+> ---
+> <CRITICAL|HIGH|MEDIUM|LOW>|<file>:<line>|static-analysis-unaddressed|<the tool's finding in one sentence>|<fix it, or add an accepted suppression / dismissal>
+> ---
+> NOTES: <at most three lines — e.g. which findings were dismissed and by whom>
+> FILES_READ: <comma-separated paths you opened>
+> ```
+
+Two things about this pass:
+
+- **It reports only the gaps.** A tidy PR where every Wiz finding was fixed or explicitly accepted returns `UNADDRESSED: 0` and no finding lines — that is the success case, and the counts still print in Step 8 so the reader sees the tool ran clean. Padding it with handled findings would bury the ones that matter.
+- **Its unaddressed findings hit the security floor in triage.** An `UNADDRESSED` line cannot be waved into NOISE or MISREAD without naming the specific handling Pass W missed (a suppression it did not see, a reply it did not read). Absent that, it is a BLOCKER — see Step 7.
 
 **Pass C — Codex** (background Bash, launched in the same message, not a subagent) — **only when `CODEX_REQUESTED: 1` and `HAS_CODEX: 1`.** Skip this pass entirely otherwise; there is nothing to launch and no field to fill.
 
@@ -576,7 +646,7 @@ Budget expectations: measured floor is ~30s on an *empty* diff (process start, g
 - **Done, rc≠0** → read `codex.err`, record `CODEX_FAILED: <reason>`, continue.
 - **Still running past `CODEX_JOIN_BUDGET`** → proceed without it. The verdict ships labeled Claude-only, and when the background task exits you post the addendum (Step 8.5). Nothing is killed; the work completes and lands on disk either way.
 
-Then audit isolation. Check each `FILES_READ:` line against the forbidden list.
+Then audit isolation. Check each `FILES_READ:` line against the forbidden list — **for the isolated passes only (A, B, N, K, R)**. **Pass W is exempt:** reading `pr-context/**` is its assigned job, so a `pr-context/` path in *its* `FILES_READ` is expected, not a leak. Any *other* pass with a `pr-context/` path, on the other hand, is the most serious leak there is (see below).
 
 - Clean → proceed.
 - Forbidden path present → note the leak, downgrade that pass's confidence (its *"by design"* concessions become suspect; its bug findings do not). Re-spawn only if the leak is material and the pass is cheap.
@@ -586,7 +656,7 @@ Self-reporting is the only audit available for *reads* — a parent agent cannot
 
 No remaining Claude pass natively hunts for intent — that was `/review`'s habit, and `/review` no longer runs here. So a forbidden read from Pass A, Pass B, or the compactor is genuinely anomalous rather than expected, and deserves more weight than a routine leak: investigate it instead of noting it and moving on.
 
-**A forbidden read by Pass N is worse than any other pass's,** and is the one leak that should make you discard output rather than downgrade it. A critic that peeked at a design doc produces findings that are still findings. A narrator that peeked at a plan, a commit message, or a PR title produces a narrative that has quietly become a *restatement of the author's claim* — indistinguishable in form from an independent reading, and it destroys the only property that made the narrative worth printing. On a Pass N leak: label the narrative `[intent-contaminated]` in the Step 8 output, or re-spawn it. Never print it clean.
+**A forbidden read by Pass N is worse than any other pass's,** and is the one leak that should make you discard output rather than downgrade it. A critic that peeked at a design doc produces findings that are still findings. A narrator that peeked at a plan, a commit message, a PR title, or anything under `pr-context/` produces a narrative that has quietly become a *restatement of the author's claim* — indistinguishable in form from an independent reading, and it destroys the only property that made the narrative worth printing. On a Pass N leak: label the narrative `[intent-contaminated]` in the Step 8 output, or re-spawn it. Never print it clean.
 
 ### Step 6.5: Reviewer mutation check (read-only enforcement)
 
@@ -616,16 +686,26 @@ Record any violation, and treat that pass's findings as still valid but its judg
 
 ### Step 7: Triage
 
-You are back in the producer context with full knowledge of design intent. Work from the compact blocks — **neither Pass N's nor Pass K's is among them**; the narrative carries no findings and the risk pass reports a class, not defects, so both stay out of triage entirely. Pass K's `RISK_LEVEL` feeds the header and the verdict framing, never a bucket. Deduplicate across passes (same `file:line` + same root cause = one finding, sources merged), then assign each to exactly one bucket:
+You are back in the producer context with full knowledge of design intent. Work from the compact blocks — **neither Pass N's nor Pass K's is among them**; the narrative carries no findings and the risk pass reports a class, not defects, so both stay out of triage entirely. Pass K's `RISK_LEVEL` feeds the header and the verdict framing, never a bucket. **Pass W's block *is* among them**, tagged `static-analysis` — its `UNADDRESSED` lines are findings and enter triage like any critic's, under the static-analysis floor below.
+
+**When `PR_CONTEXT: present`, read the PR context now — this is the producer's privilege the isolated passes were denied.** Read `$RUN_DIR/pr-context/body.md` always, and `$RUN_DIR/pr-context/discussion.md` to check surviving findings against what the PR already settled (skim it rather than reading whole when `DISCUSSION_LINES` is large). Use it two ways, and only these two:
+
+- **Do not re-raise what the thread already resolved.** A finding a maintainer explicitly dismissed in discussion, or that a later comment shows was fixed, moves to NOISE (or BY DESIGN) **with a one-line citation of the specific comment** — never dropped silently, so the reader sees it was considered.
+- **A bucket-2 "by design" may cite a decision made in the discussion**, exactly as it may cite a session decision or a standard. "The thread says the maintainer accepts X because Y" is a valid citation; "the author presumably meant to" still is not.
+
+This does not loosen anything. The discussion is the author's and reviewers' claims about the change; it justifies a *downgrade with a citation*, never an upgrade of your confidence in the code, and it never touches the security or static-analysis floors below.
+
+Deduplicate across passes (same `file:line` + same root cause = one finding, sources merged), then assign each to exactly one bucket:
 
 1. **REAL BUG** — must fix before commit. State the fix in one sentence.
 2. **REAL BUT BY DESIGN** — cite the specific decision from this session, or the specific standard/doc, that makes it intentional. No citation → reclassify as REAL BUG. Non-negotiable: this is what stops the producer from rationalizing.
 3. **STYLISTIC / NOISE** — one sentence on why it doesn't matter here.
 4. **REVIEWER MISUNDERSTOOD** — what they got wrong. Use sparingly; bias hard against this bucket. It is the escape hatch the producer-Claude reaches for.
 
-Two overrides:
+Three overrides:
 
 - **Security floor**: a `cso` finding at HIGH or CRITICAL cannot go to bucket 3 or 4 without naming the specific compensating control — the code path, config, or middleware that neutralizes it — and where it lives. Absent that, it is a REAL BUG.
+- **Static-analysis floor**: a Pass W `UNADDRESSED` finding is a REAL BUG (bucket 1) unless you can name the specific handling Pass W missed — a suppression directive it did not see, or a human dismissal reply it did not read, cited by location. It may **not** go to bucket 3 or 4 on your own judgment that it "looks fine": the entire point is that the tool flagged it and nobody dispositioned it. This holds regardless of the tool's stated severity — an unaddressed finding is a gate on the verdict, not advice.
 - **Convergence**: a finding raised by two or more passes cannot go to bucket 3 — but weight the convergence by how independent the sources actually are, because not all agreement is evidence:
 
   | Sources agreeing | Independence | Weight |
@@ -640,7 +720,7 @@ Two overrides:
 
 **In pr-remote mode there is no producer context, and the buckets change accordingly.** This is the one step where the mode genuinely alters your reasoning rather than your output format:
 
-- **Bucket 2 may not cite a session decision** — there were none; the author is someone else. It admits only a standard, a config, or a code path you can point at in `SOURCE_ROOT`. "The author presumably meant to…" is bucket 1. This is stricter than the normal rule, not looser: the usual escape hatch was legitimate only because the producer actually held the intent.
+- **Bucket 2 may not cite a session decision** — there were none; the author is someone else. It admits only a standard, a config, a code path you can point at in `SOURCE_ROOT`, or a decision explicitly recorded in the PR discussion (`pr-context/discussion.md`) — the maintainer's own words in the thread, quoted. "The author presumably meant to…" is bucket 1. This is stricter than the normal rule, not looser: the usual escape hatch was legitimate only because the producer actually held the intent, and here the only intent you may cite is one someone actually wrote down on the PR.
 - **Bucket 4 requires that you opened the file.** Claiming a reviewer misread code you have not read yourself, in a change you did not write, is a guess. Without the read, it stays in bucket 1.
 - **The verdict vocabulary is `APPROVE` / `APPROVE-WITH-COMMENTS` / `REQUEST-CHANGES`.** Bucket 1 non-empty means `REQUEST-CHANGES`.
 - Findings are **comments, not fixes.** Phrase the `→ fix:` line as what you would ask for, and never edit the PR's code.
@@ -651,37 +731,27 @@ Write the merged pre-triage findings to `$RUN_DIR/findings.tsv` for the log.
 
 **This is the primary output.** Print it in full, in chat, in this shape. Verdict first, always.
 
-In `pr` mode, one block comes before the verdict — the narrative, printed exactly as Pass N returned it, diagram and all. It goes first because in `pr` mode it is what the user asked for, and because a reader who does not yet know what the change *does* cannot evaluate a list of findings about it. It is the only thing that ever precedes the verdict line.
+In `pr` mode the chat output is deliberately short — the user asked for four things and only those: **the graph, a one-paragraph summary, the verdict, and the comments.** Everything Pass N and Pass K also produced (the rule/boundary/scope sections, the risk factor breakdown, the coverage and isolation notes) goes to `report.md` on disk in Step 10, not to chat. Do not print it here. The narrative block comes before the verdict, because a reader who does not yet know what the change *does* cannot evaluate a list of findings about it.
+
+The narrative block is exactly this — a diagram, then one short paragraph:
 
 ````
 WHAT THIS CHANGE DOES — <branch, or PR #<n>: <title>>
-vocabulary: <ddd-principles | atom-defaults> · <url, in pr-remote mode>
-
-<HEADLINE, as prose>
 
 ```mermaid
-<the DIAGRAM field from Pass N, verbatim — a sequenceDiagram or flowchart of the changed flow>
+<the DIAGRAM field from Pass N, verbatim — ONLY when the diagram could not be rendered to an image; see below>
 ```
 
-NEW OR CHANGED RULES
-  • ...
-
-BOUNDARIES AND CONTRACTS
-  • ...
-
-NOT IN THIS CHANGE
-  • ...
+<HEADLINE from Pass N, verbatim — one short paragraph, the whole summary>
+⚠ the PR title says <x>; the code says <y>.          (only when they disagree)
 ````
 
 Rules for the narrative block:
 
-- **The diagram leads, and it is the point.** Print the `DIAGRAM` field inside a ` ```mermaid ` fence, right under the headline, verbatim. It is the flow of the change; the bullet sections are the short annotations around it. Do not replace it with a prose "WHAT CHANGED" wall — that is exactly what this mode moved away from.
-- **When `DIAGRAM: none`, drop the fence** and print `(no flow diagram — this change has no domain flow)` in its place. A tooling/config/dependency change has no sequence to draw, and inventing one is the worst outcome (Step 5, Pass N). Do not manufacture a diagram the pass declined to draw.
-- **Render it when you cheaply can.** If `mmdc` is on `PATH`, render the fenced Mermaid to `$RUN_DIR/ui/flow.png` and `SendUserFile` it alongside the chat text, so a client that does not render Mermaid inline still shows the picture. This is best-effort: on any `mmdc` error, print the fence alone and move on — never block on it.
-- **Print it verbatim.** Do not rewrite it in your own words, do not "improve" it, and above all do not merge it with what you know about the change. You have the producer context; Pass N does not, and that is the point. Editing it — text or diagram — silently converts an independent reading back into the author's claim.
-- **Collapse empty sections to one line** (`NEW OR CHANGED RULES — none`) rather than dropping them. `none` is information: it says the change has no rule impact, which is different from nobody having looked.
-- **When the narrative and the PR title disagree, say so, right here, in one line.** `⚠ the PR title says <x>; the code says <y>.` This is the highest-value line this mode can emit and it is easy to leave out politely. Do not editorialize on it — state both and let the reader decide.
-- On `VOCAB: atom-defaults`, add one line: `no .lattice/standards/ddd-principles.md in this repo — the narrative uses generic DDD terms; /lattice:ddd-refiner would give it the project's own.` One line, once, no pitch.
+- **Show the graph, not its source.** If `mmdc` is on `PATH`, render the fenced Mermaid to `$RUN_DIR/ui/flow.png`, `SendUserFile` it, and **do not also print the ` ```mermaid ` fence** — the rendered image *is* the graph, and printing the syntax underneath it is the duplication this mode fixed. Only when rendering is unavailable or fails (no `mmdc`, or an `mmdc` error) print the fence as the fallback, so the graph still reaches a client that renders Mermaid inline. One or the other, never both.
+- **When `DIAGRAM: none`, print neither** — drop the fence and the image and print `(no flow diagram — this change has no domain flow)`. A tooling/config/dependency change has no sequence to draw, and inventing one is the worst outcome (Step 5, Pass N).
+- **The summary is one paragraph — the `HEADLINE`, verbatim.** Do not append the `NEW OR CHANGED RULES`, `BOUNDARIES AND CONTRACTS`, or `NOT IN THIS CHANGE` sections to chat; they live in `report.md`. Print the headline as Pass N wrote it — do not rewrite it, "improve" it, or merge it with what you know about the change. You have the producer context; Pass N does not, and that is the point.
+- **When the narrative and the PR title disagree, keep the one ⚠ line.** `⚠ the PR title says <x>; the code says <y>.` This is the highest-value line this mode emits and it survives the trim. State both and let the reader decide; do not editorialize.
 - On a Pass N isolation leak (Step 6), prefix the block `[intent-contaminated]` or omit it entirely.
 
 Then the review block:
@@ -690,12 +760,8 @@ Then the review block:
 FRESH REVIEW — <COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT>
                  (pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES)
 <branch, or PR #<n> @ <short sha>> · <N> files, +<a>/−<b> · risk: <low|med|high> · <elapsed>
-passes: lattice <✓n|✗>  cso <✓n|✗>  review <✓n|✗>  codex <✓n|⧗ running|✗ reason>  risk <low|med|high|✗>  narrative <✓|✗>
-UI preview: not shown: <UI_REASON>                                     (pr mode only; never launches)
-risk — <low|med|high>: <the RATIONALE line from Pass K>                 (pr mode only)
-  blast-radius <·> reversibility <·> security-data <·> coupling <·> operational <·> test-coverage <·>
-not covered here — /ship Step 9 owns: performance, data-migration, api-contract, red-team.
-                   (Codex-off run: cross-model is also not covered — re-run with codex for it.)
+static analysis (<tool>): <total> raised — <fixed> fixed, <suppressed> suppressed, <dismissed> dismissed, <unaddressed> unaddressed   (only when Pass W ran)
+⚠ reduced coverage: <what was missing>                               (only when a pass failed / was unavailable)
 
 BLOCKERS — fix before commit (<n>)
 1. <file>:<line>  [<sources>]  <problem>
@@ -714,21 +780,18 @@ MISREAD (<n>)
 log: <RUN_DIR>
 ```
 
+The chat block stays lean on purpose: **verdict, context line, static-analysis summary, findings.** The detailed pass inventory, the Pass K risk rationale and factor breakdown, the UI-preview line, and the coverage boilerplate all move to `report.md` (Step 10) — they are on disk for anyone who wants them, and out of the reader's way here.
+
 Rules:
 
 - The verdict is the first line of the review block, and the narrative block is the only thing permitted above it. Never bury it under a preamble.
-- In pr-remote mode the header names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open, so nobody acts on `REQUEST-CHANGES` for something that already landed.
-- `narrative ✗` in the pass line means Pass N failed or was not run. In `review` mode omit the field entirely rather than printing `narrative —`.
-- **The header `risk:` is Pass K's class** (`low` / `med` / `high`) in `pr` mode. In `review` mode Pass K does not run — print the mechanical `RISK` there instead as `risk: <normal|HIGH>`, unchanged from before. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical — risk pass failed)` so the degrade is visible.
-- **`risk` in the pass line and the two `risk —` lines are `pr` mode only.** Omit all of them in `review` mode, exactly as `narrative` is omitted. Print `risk <low|med|high>` when Pass K returned, `risk ✗` when it failed. The `risk —` rationale line and the factor line come straight from Pass K's `RATIONALE` and `FACTORS`; drop both if Pass K failed.
-- **The `UI preview:` line is `pr` mode only.** Print `not shown: <UI_REASON>` — the reason from `fr-ui-detect.sh` (`not pr mode`, `no frontend files in the diff`, or `app launching removed — …`). Step 4.6 never launches, so there is never a screenshot to announce. Omit the line entirely in `review` mode. It is never a blocker.
-- **`review` in the pass line is pr-remote only.** Omit the field entirely in `review` mode and in `pr`-on-your-branch — Pass R does not run there, exactly as `codex` is omitted on a Codex-off run. In pr-remote print `review ✓n` when it ran, `review ✗ no gstack` when `HAS_GSTACK: 0`, and `review ✗ <reason>` when it launched but failed.
-- **`codex` in the pass line has three shapes.** When `CODEX_REQUESTED: 0`, **omit the `codex` field entirely** — a Codex-off run makes no claim about Codex, exactly as `review` mode omits `narrative`. When it was requested but `HAS_CODEX: 0`, print `codex ✗ not installed`. When it ran, print `codex ✓n` / `⧗ running` / `✗ <reason>` as before. Never print `codex ✓0` on a run that did not launch it.
-- The `not covered here` line names what this skill structurally does not look at, so a `COMMIT` verdict is never mistaken for full coverage. It is not optional. Keep the parenthetical second line **only on a Codex-off run** (`CODEX_REQUESTED: 0`); drop it when Codex ran. If `HAS_GSTACK: 0`, replace the first line's trailing period with ` — but no gstack install was found, so nothing will run these.`
-- **In pr-remote, that line changes shape**, because there is no `/ship` Step 9 in a review of someone else's PR. When Pass R ran (`review ✓`), the structural specialists were covered here, not deferred — replace the line with `covered here by Pass R (gstack /review): performance, data-migration, api-contract, red-team — no later ship reviews this PR.` When Pass R was skipped (`HAS_GSTACK: 0`), the gap is real and unowned — replace it with `NOT covered — no gstack install to run performance, data-migration, api-contract, red-team, and no /ship of yours will review this PR. Run them by checking the PR out locally.`
+- The context line carries `risk:` — **Pass K's class** (`low`/`med`/`high`) in `pr` mode, the mechanical `RISK` (`normal`/`HIGH`) in `review` mode. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical)`.
+- In pr-remote mode the context line names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open, so nobody acts on `REQUEST-CHANGES` for something that already landed.
+- **The `static analysis` line prints only when Pass W ran** (`SA_PRESENT: 1`). It gives the reader the whole feature-1 answer in one line: how many the tool raised and how they broke down. Its `<unaddressed>` count equals the number of Pass W blockers below. Omit the line entirely when no analyzer findings were on the PR.
+- **The `⚠ reduced coverage` line prints only when the run actually lost a lens** — a critic pass failed, `HAS_GSTACK: 0`, a requested Codex could not run, or (pr-remote) Pass R could not run. Name what is missing in one line (e.g. `cso did not run — no gstack install`; `Pass R skipped — structural specialists and red-team not covered, and no /ship of yours reviews this PR`). On a clean full run, omit it. This is the one safety signal kept in chat; the exhaustive "what this skill structurally defers to /ship" note lives in `report.md`.
 - **Every finding from every pass appears here**, in one of the four buckets. Deduplicated, with its sources tagged, but never dropped and never deferred to the report file. A bucket with zero findings collapses to a single `BY DESIGN (0)` line.
-- Blockers get the full two-line treatment. The other three buckets get one line each.
-- `[<sources>]` is the merged source list (`lattice`, `cso`, `review`, `codex`) — this is how the user sees which passes converged, which is the signal the cross-model rule is built on. `review` appears only on pr-remote runs.
+- Blockers get the full two-line treatment. The other three buckets get one line each. In pr-remote, blockers are phrased as `→ ask:` (comments, not fixes), matching the verdict vocabulary.
+- `[<sources>]` is the merged source list (`lattice`, `cso`, `review`, `codex`, `static-analysis`) — this is how the user sees which passes converged. `review` appears only on pr-remote runs; `static-analysis` only when Pass W ran.
 - The `log:` line is a footer, not a substitute for anything above it.
 
 If more than ~40 findings survive dedup, keep all blockers in full and collapse buckets 3 and 4 to counts plus their highest-severity three, noting the collapse. Do not collapse bucket 2 — an uncited "by design" is the thing most worth seeing.
@@ -762,7 +825,7 @@ Build the pass list from the passes that actually ran and returned `STATUS: ok`.
 ```
 
 - `STATUS` is `clean` only when bucket 1 is empty; otherwise `issues_found`.
-- The fourth argument is the comma list of **critic** passes that returned `STATUS: ok` — drop any that failed or were unavailable, **and never include `codex` on a Codex-off run** (it never launched, so it covered nothing), and never include `narrative`. This is load-bearing, not bookkeeping: the ship-side gate only cuts ship's `testing`/`maintainability` specialists if `lattice` is in that list, and only cuts ship's Codex passes if `codex` is. Listing `codex` when it did not run would make ship **skip** its own Codex passes on the strength of a fresh-review pass that never happened — silently removing cross-model coverage from the final gate. The default (Codex-off) run must therefore hand ship `lattice,cso` and let ship run its own Codex. And `narrative` reports no findings at all, so listing it would claim coverage that nothing produced.
+- The fourth argument is the comma list of **critic** passes that returned `STATUS: ok` — drop any that failed or were unavailable, **and never include `codex` on a Codex-off run** (it never launched, so it covered nothing), and never include `narrative`, `risk`, or `static-analysis`. This is load-bearing, not bookkeeping: the ship-side gate only cuts ship's `testing`/`maintainability` specialists if `lattice` is in that list, and only cuts ship's Codex passes if `codex` is. Listing `codex` when it did not run would make ship **skip** its own Codex passes on the strength of a fresh-review pass that never happened — silently removing cross-model coverage from the final gate. The default (Codex-off) run must therefore hand ship `lattice,cso` and let ship run its own Codex. `narrative` and `risk` report no findings, and `static-analysis` maps to no ship specialist — listing any of them would claim coverage that nothing produced.
 - `findings.json` is a JSON array you write first. Rules for it:
   - **Only buckets 2, 3, and 4**, each as `action: "skipped"`. Those are the decisions worth carrying forward.
   - **Never log a bucket 1 (REAL BUG) finding.** Omitting it is deliberate: ship re-reviews it, which is the regression check on your fix. Logging it as `skipped` would suppress the one finding you most need re-verified.
@@ -802,22 +865,25 @@ This must run even on abort or error. If the user interrupts mid-review, restori
 
 ### Step 10: Persist the run log
 
-Write `$RUN_DIR/report.md` (the Step 8 chat output verbatim, plus scope, pass inventory, and isolation-audit result), then `$RUN_DIR/run.json`:
+Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where the **long form** goes: the Step 8 chat output, plus everything trimmed off it (the full narrative sections `NEW OR CHANGED RULES` / `BOUNDARIES AND CONTRACTS` / `NOT IN THIS CHANGE`, the Pass K risk rationale and factor line, the full pass inventory line, the UI-preview line, the structural "not covered here — /ship owns …" note, the PR-context and static-analysis summary, the scope, and the isolation-audit result). Nothing that used to be in chat is lost; it just lives here now. Then write `$RUN_DIR/run.json`:
 
 ```json
-{"skill":"fresh-review","schema":7,"run_id":"<RUN_ID>",
+{"skill":"fresh-review","schema":8,"run_id":"<RUN_ID>",
  "ts_start":"<TS_START>","ts_end":"<now>","duration_s":0,
  "repo":"<repo>","branch":"<BRANCH>","base":"<BASE>",
  "mode":"<review|pr>","codex_requested":false,
  "pr":{"number":0,"url":"","state":"","head":"","drift":false},
+ "pr_context":{"present":false,"comments":0,"reviews":0,"threads":0,"discussion_lines":0},
  "scope":"<REVIEW_SCOPE>","diff_base":"<DIFF_BASE>","checkpoint":"<CHECKPOINT_SHA>",
  "risk":"<RISK>","risk_level":"<low|med|high>",
+ "static_analysis":{"present":false,"tool":"","total":0,"fixed":0,"suppressed":0,"dismissed":0,"unaddressed":0},
  "ui_preview":{"frontend":false,"reason":"<UI_REASON>"},
  "diff":{"files":0,"lines":0},
  "passes":[
    {"name":"lattice","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"cso","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"review","status":"ok","duration_s":0,"findings":0},
+   {"name":"static-analysis","status":"ok","duration_s":0,"tool":"","unaddressed":0},
    {"name":"codex","status":"ok","duration_s":0,"findings":0,"changed_verdict":false},
    {"name":"risk","status":"ok","duration_s":0,"risk_level":"<low|med|high>","isolation":"clean"},
    {"name":"narrative","status":"ok","duration_s":0,"findings":0,"isolation":"clean",
@@ -832,6 +898,8 @@ Write `$RUN_DIR/report.md` (the Step 8 chat output verbatim, plus scope, pass in
 - Omit `pr` outside pr-remote mode, and both the `narrative` and `risk` passes outside `pr` mode — an absent pass and a failed one must stay distinguishable. Likewise omit `risk_level` (top-level) and the `ui_preview` object outside `pr` mode; they are pr-mode artifacts. `risk` (the mechanical class) is always present.
 - **Keep the mechanical `risk` and Pass K's `risk_level` distinct.** `risk` is `normal`/`high` from `fr-packet.sh`'s pattern count and gates `/cso` depth; `risk_level` is Pass K's `low`/`med`/`high` judgment and is what the header shows. In `review` mode `risk_level` is absent and only `risk` exists. When the `risk` pass failed, keep its entry with `"status":"failed"` and omit `risk_level`.
 - **Omit the `review` pass from `passes[]` outside pr-remote**, and when `HAS_GSTACK: 0` in pr-remote (it could not run). Keep the entry with `"status":"failed"` only when it launched and failed — same rule as `codex`.
+- **Omit the `static-analysis` pass and set `static_analysis.present:false` when `SA_PRESENT: 0`** — the PR raised no analyzer findings, or there was no PR, so the pass never launched. When it ran, fill `static_analysis` from Pass W's `TOOL` / `TOTAL` / `FIXED` / `SUPPRESSED` / `DISMISSED` / `UNADDRESSED` counts and keep the pass entry; keep it with `"status":"failed"` if it launched and failed. `unaddressed` is the count that became blockers.
+- **Set `pr_context` from `fr-pr-context.sh`.** `present:false` when `PR_CONTEXT` was `none` or `unavailable`; otherwise fill `comments` / `reviews` / `threads` / `discussion_lines` from its keys. It records whether the producer had the PR's discussion to triage against, independent of whether any static-analysis pass ran.
 - `ui_preview.frontend` is whether the diff touched UI (`fr-ui-detect.sh`'s `FRONTEND_HITS > 0`), and `reason` is the `UI_REASON`. Step 4.6 never launches, so there is no `shown`/`eligible` to record. `narrative.diagram` records which shape Pass N drew (`sequence`, `flowchart`, or `none`) — the direct measure of whether the diagram-first mode is producing diagrams or declining them.
 - `tools.codex` stays availability (`HAS_CODEX`), independent of whether the run requested Codex.
 
@@ -853,7 +921,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - *Is the narrative telling anyone anything?* `narrative.title_mismatch` over many pr-remote runs is the direct measure. If it is never true, the mode is producing pleasant restatements and its isolation is not buying what it costs; if it is often true, PR descriptions in this repo are not to be trusted, which is worth knowing on its own. `narrative.diagram` alongside it says whether the diagram-first mode is actually drawing diagrams or mostly returning `none`.
 - *Does the risk class track reality?* `risk_level` against the triage counts over many runs answers whether the pass is calibrated: `high`-risk runs should not be the ones with zero real bugs *and* zero caution, and a repo where every change comes back `low` has a pass that has stopped discriminating.
 
-**Schema history.** `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
+**Schema history.** `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
 
 ## Failure modes and recovery
 
@@ -864,7 +932,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Codex times out / fails** (only possible when `--codex` was requested) → verdict ships Claude-only, `CODEX_FAILED` in the log, the `codex` pass kept with `"status":"failed"`. Never substitute a Claude pass for it. Fix is `codex login` and re-run.
 - **Codex not requested** (`CODEX_REQUESTED: 0`, the default) → not a failure. Pass C never launches, the pass line omits `codex`, and the run log records `codex_requested:false` with no `codex` pass. Mention once that `--codex` adds a cross-model pass if the user wants it; do not treat its absence as reduced coverage.
 - **Subagent tries to fix code** → Step 6.5 catches it; `--revert` undoes it unless the checkpoint failed.
-- **Pass R (review army) not run** → in pr-remote with `HAS_GSTACK: 0`, or when the pass errors, log it as skipped/failed, print `review ✗` and the unowned-gap form of the `not covered here` line (Step 8), and continue. The verdict must name the missing structural lens, never imply ship will catch it.
+- **Pass R (review army) not run** → in pr-remote with `HAS_GSTACK: 0`, or when the pass errors, log it as skipped/failed, surface it in the `⚠ reduced coverage` chat line (Step 8), record the full unowned-gap note in `report.md`, and continue. The verdict must name the missing structural lens, never imply ship will catch it.
 - **Pass R mutates the PR worktree** → its fix-first override should prevent any edit, but a mutation lands in `SOURCE_ROOT`, a disposable worktree deleted in Step 9, not your tree — so Step 6.5's user-tree check will not see it. If its NOTES report a fix was applied, treat its findings as reviewed against a modified tree and note it; the worktree is discarded regardless.
 - **User aborts midway** → `fr-restore.sh "$RUN_DIR"` first, then report what was collected.
 - **Forbidden read detected** → Step 6 handles it: note, downgrade confidence, optionally re-spawn. A Pass N leak is the exception — label the narrative contaminated or drop it, never print it clean.
@@ -876,6 +944,12 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Pass N returns invalid Mermaid** (renders to an error, or is not a fenced `mermaid` block) → print the headline and text sections without the diagram, note `narrative ✗ diagram` in NOTES, and do not hand-fix the syntax with your own knowledge of the change — a diagram you drew is the author's-claim contamination the isolation exists to prevent. Re-spawn once if it is cheap; otherwise ship the text sections alone.
 - **Pass K fails or is not returned** → the run is not blocked. Print the header risk as the mechanical class with ` (mechanical — risk pass failed)`, drop the `risk —` rationale and factor lines, keep the `risk` pass in the log with `"status":"failed"`, and continue. Risk is context for the verdict, never a gate on it.
 - **UI presence check** → never an error and never a blocker. Step 4.6 runs `fr-ui-detect.sh` and prints one `UI preview — not shown: <UI_REASON>` line (`not pr mode`, `no frontend files in the diff`, or `app launching removed — …`). It launches nothing, so there is no capture to hang, fail, or wait on.
+- **No PR for this branch** (`PR_CONTEXT: none`) → the normal default pre-commit case. PR-context triage and static-analysis verification simply do not apply; say nothing about them and run as before.
+- **PR context unavailable** (`PR_CONTEXT: unavailable`) → `gh` is missing or a call failed (`REASON`). State it once — the discussion was not read and static-analysis follow-through was not verified — and continue. Never a blocker.
+- **No static-analysis findings on the PR** (`SA_PRESENT: 0`) → Pass W does not run and this is not a gap. Do not print a `static analysis` line or a coverage caveat for it — there was nothing to verify.
+- **Pass W returns UNADDRESSED findings** → each hits the static-analysis floor (Step 7) and is a blocker unless you cite the specific suppression or dismissal it missed. This is the intended path of feature 1, not a failure.
+- **Pass W fails or errors** → log it with `"status":"failed"`, add `static-analysis follow-through not verified` to the reduced-coverage line, and continue. Its absence is a missing lens named in chat, never a silent pass.
+- **Diagram rendered to an image** → print the image only (via `SendUserFile`), never the ` ```mermaid ` fence underneath it. Printing both is the duplication feature 3 removed; the fence is the fallback for when `mmdc` is unavailable or errors, and then it is printed *instead of* an image, not in addition.
 - **Do not reintroduce app launching** → launching a review tree was removed in v0.9.0 because it is an RCE risk that cannot be gated: a review tree may be untrusted (a `--pr` fetch, or a fork/dependabot branch checked out locally and reviewed with `--mode pr`), and provenance is not mechanically decidable. Never add a launch path gated on `REVIEW_SCOPE`, filesystem location, worktree disposability, or git author metadata — none of those is a trust boundary. To view the UI, open the branch yourself.
 - **PR head moves mid-review** (`HEAD_DRIFT: yes`) → not an error. Everything was reviewed at `PR_HEAD`; say so in the header and move on. Do not re-fetch — that would mix two commits' findings in one report.
 - **PR worktree survives the run** (`WORKTREE: failed`) → tell the user the path and that `git worktree remove --force <path>` clears it. Do not leave it undisclosed; it is a full checkout's worth of disk.
@@ -890,7 +964,8 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Run the CI gates.** Tests, coverage, and lint are `/ship`'s job. A `COMMIT` verdict says the code reads correctly, not that it passes.
 - **Stop `/ship` from reviewing again.** Ship's pre-landing review is unconditional and reviews the *final* diff — post-fix, post-CHANGELOG, post-base-merge — a different artifact from what these passes saw. `references/ship-dispatch-gate.md` trims the parts that are genuinely duplicated; the rest is supposed to run.
 - **Analyze runs across sessions.** The log is written to be analyzable; reading it is a separate tool's job.
-- **Post anything to GitHub.** The narrative and the risk class are printed to chat and written to disk, never sent. No `gh pr comment`, no `gh pr review`, no `gh pr edit --body`, no uploading a screenshot to the PR, not even in pr-remote mode where a PR is plainly sitting there — publishing a review under the user's name is theirs to decide, and an unattended run inside `/loop` must not be able to do it. If they want it posted, they will say so, and that is a separate action taken with the text in front of them.
+- **Post anything to GitHub.** The narrative and the risk class are printed to chat and written to disk, never sent. No `gh pr comment`, no `gh pr review`, no `gh pr edit --body`, no uploading a screenshot to the PR, not even in pr-remote mode where a PR is plainly sitting there — publishing a review under the user's name is theirs to decide, and an unattended run inside `/loop` must not be able to do it. If they want it posted, they will say so, and that is a separate action taken with the text in front of them. Reading the PR's description and discussion (Step 4.7) is read-only and one-directional: nothing is ever written back.
+- **Feed PR context to the review passes.** The description, discussion, and bot findings gathered in Step 4.7 reach only the producer (triage) and Pass W. The critics and the narrator stay blind to them by design — that is the whole reason the gather writes to a producer-only directory the isolated passes are forbidden to read. If you find yourself handing `pr-context/` to Pass A, B, N, K, or R, you have broken the skill's central invariant.
 - **Modify the PR under review.** pr-remote mode is read-only on someone else's branch. Findings are comments; the worktree is disposable and gets deleted.
 - **Review a PR from another repo.** `foreign_repo` stops it. There is no local tree to materialize the head into, and a patch without its source tree produces reviewers reading the wrong file contents. Clone that repo and run there.
 - **Replace reading the diff.** The narrative is at product altitude by construction — no paths, no names, no code. It tells you what changed and what it means; it cannot tell you whether line 84 is right. It is an orientation and a cross-check, not a substitute for review, which is exactly why this mode never ships it without one.
@@ -899,7 +974,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 
 **"fresh review my changes before I commit"** → the default run: Steps 1–10, `--codex` **not** passed; branch-scoped packet built once; two isolated Claude subagents (lattice + `/cso`), no Codex; verdict and every finding printed to chat; tree restored; run logged. No questions asked at any point.
 
-**"fresh review with codex"** / **"review my changes, cross-model too"** → `--codex`. Same run plus Pass C launched in the background alongside the two subagents; the pass line shows `codex`, and Step 8.5 posts an addendum if it lands late. Everything else is identical to the default.
+**"fresh review with codex"** / **"review my changes, cross-model too"** → `--codex`. Same run plus Pass C launched in the background alongside the two subagents; the run records the `codex` pass in `report.md`/`run.json`, and Step 8.5 posts an addendum in chat if it lands late. Everything else is identical to the default.
 
 **"review this before I push"** with `auth/` in the diff → `fr-packet.sh` returns `RISK: high` on `PATH_HITS`; `/cso` upgrades to `--diff --comprehensive`. Risk does **not** pull in Codex — this is still a two-source run unless the user also asked for `--codex`; the sources are triaged under the security floor.
 
@@ -907,14 +982,16 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 
 **Codex still running when the Claude passes return** (a `--codex` run) → verdict prints as `codex ⧗ running`; the background task completes eight minutes later; Step 8.5 posts the addendum and records whether it moved the verdict.
 
-**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, the two Claude critics, plus Pass N (diagram), Pass K (risk), Step 4.5's vocabulary resolution, and Step 4.6's UI presence check — no Codex, since it was not requested. Chat gets the Mermaid flow diagram and its short annotations, the risk class, a one-line note if the change touches UI, then the verdict and every finding. Handoff and restore run as normal, because this is still your branch.
+**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, the two Claude critics, plus Pass N (diagram), Pass K (risk), Step 4.5's vocabulary resolution, Step 4.6's UI presence check, and Step 4.7's PR-context gather if the branch has an open PR — no Codex, since it was not requested. Chat gets the rendered graph, one short paragraph, then the verdict and every finding — nothing else; the risk class, the factor breakdown, and any UI note go to `report.md`. Handoff and restore run as normal, because this is still your branch.
 
-**"review PR 42"** → `--pr 42`. Step 1.5 resolves it, fetches `pull/42/head`, and builds a detached worktree; Step 3 is skipped; the two critics, Pass N, and Pass K read the PR's diff and open files from the PR's tree, and — because no `/ship` of yours will ever review this PR — Pass R runs gstack `/review` report-only in that worktree, adding `performance`, `data-migration`, `api-contract`, and Red Team coverage (add `--codex` for this skill's own cross-model pass too). Verdict prints as `APPROVE-WITH-COMMENTS` with `review ✓n` and `risk med` in the pass line, bucket 2 admits only standards citations, no handoff, and Step 9 deletes the worktree. Your own uncommitted work is untouched throughout — and nothing is posted to the PR.
+**"review PR 42"** → `--pr 42`. Step 1.5 resolves it, fetches `pull/42/head`, and builds a detached worktree; Step 3 is skipped; Step 4.7 gathers PR #42's description and discussion into `pr-context/` (producer-only); the two critics, Pass N, and Pass K read the PR's diff blind and open files from the PR's tree, and — because no `/ship` of yours will ever review this PR — Pass R runs gstack `/review` report-only in that worktree, adding `performance`, `data-migration`, `api-contract`, and Red Team coverage (add `--codex` for this skill's own cross-model pass too). Chat gets the graph, one paragraph, the `APPROVE-WITH-COMMENTS` verdict, and the findings; the risk class and pass inventory go to `report.md`. Triage may cite a maintainer's decision from the thread for bucket 2, no handoff runs, and Step 9 deletes the worktree. Your own uncommitted work is untouched throughout — and nothing is posted to the PR.
 
-**"review PR 42"** where the PR adds a checkout screen → Step 4.6 finds frontend files and prints `UI preview — not shown: app launching removed — fresh-review does not launch a review tree (N frontend file(s) changed); open the branch yourself to view the UI`. It does not launch the PR's app — that would run the author's code on your host — and it does not tell you to "just check it out locally," because a locally-checked-out PR is no more trusted than the fetched one. To view the UI, open the branch in an environment where you have judged it safe to run.
+**"review PR 42"** where the CI gate ran Wiz and left findings → same run, plus Step 4.7 reports `SA_PRESENT: yes  SA_TOOL: wiz`, so Pass W launches in Step 5. It reads the gathered Wiz findings and, for each, checks the PR diff and source: two were fixed, one carries a `wiz-ignore` with a reason, and one is still present with nobody having replied. Chat adds `static analysis (wiz): 4 raised — 2 fixed, 1 suppressed, 0 dismissed, 1 unaddressed`, and the one unaddressed finding appears as a BLOCKER under the static-analysis floor, pushing the verdict to `REQUEST-CHANGES`. Had all four been fixed, suppressed, or dismissed, the line would read `0 unaddressed` and no blocker would come from it.
+
+**"review PR 42"** where the PR adds a checkout screen → Step 4.6 finds frontend files and records `UI preview — not shown: app launching removed — fresh-review does not launch a review tree (N frontend file(s) changed); open the branch yourself to view the UI` in `report.md` (it is no longer printed to the lean chat block). It does not launch the PR's app — that would run the author's code on your host — and it does not tell you to "just check it out locally," because a locally-checked-out PR is no more trusted than the fetched one. To view the UI, open the branch in an environment where you have judged it safe to run.
 
 **"explain PR 42 for the standup"** with no `.lattice/standards/ddd-principles.md` → identical run, `VOCAB: atom-defaults`. The diagram and its annotations use generic domain terms and nouns lifted from the code's own naming, the report says so in one line, and the review still runs in full.
 
-**A tooling-only PR** — CI workflow and lockfile → Pass N returns `HEADLINE: this change has no domain meaning; it is CI and dependency work`, `DIAGRAM: none`, every domain section `none`; Pass K returns `RISK_LEVEL: high` on the IaC/operational surface. That is the correct output, printed as-is — no invented diagram. `RISK: high` (mechanical) still fires on the IaC path, so `/cso` runs comprehensive over it, and Step 4.6 prints `UI preview — not shown: no frontend files in the diff`.
+**A tooling-only PR** — CI workflow and lockfile → Pass N returns `HEADLINE: this change has no domain meaning; it is CI and dependency work`, `DIAGRAM: none`, every domain section `none`; Pass K returns `RISK_LEVEL: high` on the IaC/operational surface. That is the correct output, printed as-is — no invented diagram. `RISK: high` (mechanical) still fires on the IaC path, so `/cso` runs comprehensive over it, and Step 4.6 records `UI preview — not shown: no frontend files in the diff` to `report.md`.
 
 **The PR title says "add refund support"; the narrative says a fee is recorded but never reversed** → the `⚠` mismatch line in Step 8, `title_mismatch: true` in the run log. This is the outcome the whole isolation contract exists to make possible.
