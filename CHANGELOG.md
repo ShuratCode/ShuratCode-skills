@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.20.0 — 2026-09-24
+
+### `fresh-review` 0.11.0 → 0.12.0: stack mode — an orchestrator for PR stacks
+
+Given a stack of PRs instead of one PR, fresh-review now plans the reviews instead of running one.
+
+- **New mode, `--stack "<refs>"`.** Triggered by the word "stack" or by two or more PRs. One ref is
+  enough: the script finds the rest of the stack from the base branches of the open PRs. It stops at a
+  fork and says where.
+- **Analyze, then decide.** A new script, `fr-stack.sh`, measures each PR on its own delta, with the
+  same packet script and risk rule as a review. It then groups the PRs, bottom to top, into review
+  units. A PR joins the unit below it only when it is linked to it, nothing in the pair is high risk,
+  the combined diff is not high risk, and it is small (80 lines, `FR_STACK_SMALL_LINES`) or shares at
+  least half its files. A high-risk PR is always reviewed alone. Every decision has a one-line reason.
+- **One handoff per unit, printed in chat.** The orchestrator prints the plan and one handoff prompt
+  per unit, ready to copy. You open a new session for each unit and paste its handoff, so you control
+  where and when each review runs. The skill never starts a session itself. It reviews no code.
+  Handoffs carry scope and mechanics only — never PR titles or a summary — so each review producer
+  stays blind to the author's claims and to the other units.
+- **Progress comes back to the orchestrator.** Each unit's review ends with a `STACK REPORT` line.
+  You paste it into the orchestrator session, and a new script, `fr-stack-status.sh`, records it and
+  prints the stack's status and overall verdict: `REQUEST-CHANGES` as soon as one unit has it,
+  `pending` until every unit reports, then the weakest unit's verdict. A unit can be reported again
+  after fixes.
+- **A stack of one PR is reviewed right away,** in the same session, as a normal `--pr` review.
+- **`--pr <top> --since-pr <bottom>`** reviews a combined unit as one pr-remote change: the diff runs
+  from the bottom PR's base to the top PR's head. `fr-pr-context.sh` gathers the description,
+  discussion, and static-analysis findings of every PR in the unit, so Pass W checks them all.
+
+Run-log schema bumped to `schema:10` (a `mode: "stack"` orchestrator entry and an optional `stack`
+object on each unit's review). New test `tests/test-stack.sh` (plan, handoffs, and status tracking); `tests/test-pr-context.sh` covers a
+two-PR unit.
+
 ## 0.19.0 — 2026-09-24
 
 ### `fresh-review` 0.10.0 → 0.11.0: architecture first, then implementation

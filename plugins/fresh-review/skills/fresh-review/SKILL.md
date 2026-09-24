@@ -38,6 +38,14 @@ description: |
   ("review PR 42", "look at github.com/o/r/pull/42"). That mode reviews *and* narrates: it is the
   default run plus a narrator pass, a risk pass, and a UI-touch note, never a summary in place of a review.
 
+  Has a third mode — **stack** — for a stack of PRs. It reviews nothing itself. It acts as an
+  orchestrator: it maps the stack, measures each PR, decides which PRs are reviewed alone and which
+  are combined into one review, and prints one handoff prompt per review in chat. The user runs
+  each review in a new session, by hand, and reports back; the orchestrator tracks the stack's
+  progress and its overall verdict. A stack of one PR is reviewed right away, in
+  the same session. Use it when the user asks to "review this stack", "review the stack for PR
+  42", "review PRs 41 42 43", "review my stacked PRs", or names two or more PRs to review.
+
   This is the right tool whenever the producer-Claude and the reviewer-Claude would otherwise be the
   same instance with the same context — the entire point is to break that bias. Do NOT call
   /lattice:review or /cso directly when the user wants fresh eyes; those run inside the producer
@@ -71,11 +79,14 @@ Two output shapes, one machine. Every mode fans out the same critic passes again
 | "fresh review", "review before I commit", "what did I miss" | *(none)* | your branch | verdict + findings |
 | "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **the graph** + **one-paragraph summary** + verdict + findings |
 | "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **the graph** + **one-paragraph summary** + verdict + findings |
+| "review this stack", "review the stack for PR 42", "review PRs 41 42 43" | `--stack "<refs>"` | nothing — this session only plans | **the plan** + **one handoff per review** |
 
 The chat output is deliberately lean — the graph (rendered, not its source), one short paragraph, the verdict, the comments. The risk class, the risk factor breakdown, the full narrative sections, the pass inventory, and the coverage notes are written to `report.md`, not printed. Whenever the review subject has an associated PR (always in pr-remote; auto-discovered on your own branch), the run also gathers PR context (Step 4.7) and, if the PR carried static-analysis findings, adds one static-analysis summary line and verifies each finding was handled (Pass W).
 
 Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do not re-derive it later.
 
+- **Explicit flags win.** When the request already carries `--pr`, `--since-pr`, or `--stack`, pass them through verbatim and do not re-read the numbers in it. A stack handoff starts with `--pr 43 --since-pr 42`: that is one pr-remote review, not a stack.
+- The word **stack**, or **two or more** PR numbers or pull URLs, means `--stack "<the refs>"`. One ref with the word stack ("review the stack for PR 42") is enough: the script finds the rest of the stack.
 - A **number or pull URL** anywhere in the request means `--pr <that>` — which implies `--mode pr`.
 - Any plain-English *"what does this do"* framing means `--mode pr` with no PR ref: same branch, same passes, plus the narrative.
 - Everything else is the default. When in doubt, default. The narrative is additive, so guessing `review` costs the user a paragraph; guessing `pr` on a plain pre-commit check costs a subagent.
@@ -121,6 +132,29 @@ This is the one place the skill stops for an answer. It never assumes approval: 
 
 The verdict vocabulary is not cosmetic. `COMMIT` on someone else's PR reads as an instruction to the wrong person about the wrong tree, and this skill's output is designed to be read verdict-first.
 
+### Stack mode (orchestrator)
+
+A stack is a chain of PRs where each PR's base branch is the head branch of the PR below it. `--stack` turns this session into an **orchestrator**. It reviews no code. It does three things, then stops:
+
+1. **Analyze.** `fr-stack.sh` maps the stack and measures every PR on its own delta (from the PR below it, not from `main`). It uses the same packet script and the same risk rule as a review, so it sees counts, never a diff.
+2. **Decide.** It groups the PRs, bottom to top, into **review units**. A unit is one PR, or a run of adjacent PRs reviewed as one change.
+3. **Hand off.** It prints one handoff prompt per unit in chat. **The user runs each unit in a new session, by hand**, and pastes the handoff there. This skill never starts a session, and never gives a command that starts one: the user decides where, when, and in what order each review runs.
+4. **Track.** The orchestrator session stays open. Each review ends with a `STACK REPORT` line; the user pastes it back here, and the orchestrator records it and shows where the stack stands.
+
+**A stack of one PR is not handed off.** There is nothing to plan, so the script says `NEXT: review_here` and the review runs in this session as a normal `--pr` review.
+
+**Why a new session per unit, and not subagents here** (stacks of two or more PRs). This session has read the PR titles and the plan. A review producer that knows the author's claims triages with that bias, and a review is itself a full orchestration — its own subagents, its own architecture gate, its own question to the user. One session per unit keeps each review blind to the others and gives each one its own context budget.
+
+**The grouping rules** (in `fr-stack.sh`, applied bottom to top). A PR joins the unit below it only when **all** of these hold:
+
+- it is **linked**: its base branch is the head branch of the PR below it;
+- neither it nor the unit below is `RISK: high`, and the **combined** diff is not `RISK: high` either — checked by running the packet script on the combined range. A high-risk PR is always reviewed alone. So a combined review never forces Codex or `/cso --comprehensive` that the parts would not;
+- **and** one of: it is small (`FR_STACK_SMALL_LINES`, default 80 changed lines), the unit below is small, or at least half of the smaller file set is shared (a follow-up to the same code).
+
+Otherwise it starts a new unit. Every decision carries a one-line reason, which goes to the plan and the handoff.
+
+**A combined unit is one pr-remote review of a range.** Its handoff runs `--pr <top> --since-pr <bottom>`. `fr-pr-resolve.sh` walks the stack down from the top PR to the bottom one, and the diff runs from the bottom PR's base branch to the top PR's head. Step 4.7 gathers the description, discussion, and static-analysis findings of **every** PR in the unit, so Pass W checks them all.
+
 ## Configuration
 
 ```
@@ -129,6 +163,8 @@ CSO_CMD="/cso --diff"                    # gstack security audit, scoped to bran
 CODEX_JOIN_BUDGET=240                    # seconds to wait for Codex after the Claude passes return
 FR_RUN_RETENTION=20                      # run directories kept before pruning (env var, read by fr-log.sh)
 DDD_DOC=".lattice/standards/ddd-principles.md"   # narrative vocabulary; resolved by fr-ddd-vocab.sh
+FR_STACK_SMALL_LINES=80                  # stack mode: a PR this small joins the unit below it (env var)
+FR_HANDOFF_CMD="/fresh-review:review"    # stack mode: the command each handoff starts with (env var)
 ```
 
 - Review scope is resolved mechanically by `fr-preflight.sh`: `branch` (merge-base..worktree) whenever an `origin/<base>` exists to merge-base against, `working` otherwise — or `pr` (merge-base..PR head), set by `fr-pr-resolve.sh` when a PR ref was given. `branch` matches what a human PR reviewer sees, and a Lattice `checkpoint_mode: continuous` session already has WIP commits on the branch that `working` scope would silently skip.
@@ -183,7 +219,7 @@ The same principle governs the shell work: every mechanical step is a script in 
 
 ## Workflow
 
-Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **4.8** (architecture gate) runs in every mode unless `--arch-approved` and can end the run before Step 5, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
+Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. In stack mode only Steps 0, 1, and **S** run — Step S replaces the rest, except for a stack of one PR, which Step S turns back into a normal `--pr` run. Otherwise, steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **4.8** (architecture gate) runs in every mode unless `--arch-approved` and can end the run before Step 5, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
@@ -225,12 +261,17 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42            # pr-rem
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --codex            # review mode + Codex (Pass C)
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42 --codex    # pr-remote + Codex
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --arch-approved    # skip the architecture gate (Step 4.8)
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --stack "42"       # stack mode: find the stack around PR 42
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --stack "41,42,43" # stack mode: exactly these PRs
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 43 --since-pr 42  # one review of PRs 42..43 (a stack unit)
 ```
 
 <!-- FR:BOOTSTRAP:START -->
 Run this with the plugin root from Step 0 set in the same shell — prefix the command with `CLAUDE_PLUGIN_ROOT="<the path Step 0 resolved>"`, since this fresh shell does not carry it.
 <!-- FR:BOOTSTRAP:END -->
 This probes the repo, resolves the review scope, creates the run directory, and writes `state.env` — including the plugin root itself, so no later step has to resolve it again. Export `RUN_DIR` from its output — every later script takes it as `$1`. Pass the flags from the Modes table verbatim, add `--codex` only when the invocation asked for it (see "The Codex opt-in, and the high-risk rule" — high risk turns Codex on later, in Step 4, without the flag), and add `--arch-approved` only when the user said the architecture is already approved (see "The architecture gate"); the script rejects an unknown flag or mode with a non-zero exit rather than falling back to a default, because a silently-defaulted `--pr` would review the local branch under someone else's PR number.
+
+**In stack mode, go from here straight to Step S.** It replaces every other step (a stack of one PR comes back here as a `--pr` run).
 
 On `STATUS: stop`, tell the user and stop. `STOP_REASON` is one of:
 
@@ -261,6 +302,47 @@ The run directory persists, unlike a `mktemp` scratch dir — it is the record t
 
 `LOG_DIR` is deliberately the **common** git dir, not the per-worktree one. In a worktree `git rev-parse --git-dir` resolves to `.git/worktrees/<name>`, so an index written there would fragment across worktrees and be deleted with them — and cross-run analysis would silently see only a fraction of the history. Run directories stay local and disposable; the index in `LOG_DIR` is the durable record. Entries may therefore outlive the run directory they point at, which is expected.
 
+### Step S: Orchestrate the stack (stack mode only)
+
+Skip unless `MODE` is `stack`. This step is the whole run in stack mode: no checkpoint, no packet, no gate, no reviewer. It never edits the tree.
+
+```bash
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-stack.sh" "$RUN_DIR"
+```
+
+On `STACK: unresolved`, stop and say why. `REASON` is one of `gh_missing`, `no_stack_ref`, `bad_stack_ref`, `foreign_repo`, `gh_pr_list_failed`, `gh_pr_view_failed`, `pr_fetch_failed`, `no_merge_base`, or `stack_script_failed` (the script's stderr has the detail). Never fall back to reviewing one PR here.
+
+On `STACK: resolved` with `NEXT: review_here`, the stack is one PR. Do not print a plan or a handoff. Say `Stack of one PR (#<n>) — reviewing it here.`, then run Step 1 again with `REVIEW_ARGS` as the flags (it is `--pr <n>`, plus `--codex` when this run had it) and follow the normal pr-remote flow from Step 1.5. The stack run directory is left as it is; the review has its own.
+
+On `STACK: resolved` with `NEXT: handoff`, print the plan, then the handoffs, and stop:
+
+1. **The plan.** Print `$STACK_PLAN` (`stack/plan.md`) verbatim. It is short: the stack order, then one row per unit with its PRs and titles, size, risk, and why. When `FORK_AT` is not `none`, the stack branches above that PR and only the path to the given PR was planned — say so, and say that `--stack` with explicit refs plans a different branch.
+2. **The handoffs.** For each unit `k`, print a `Unit <k> of <n>` heading, then its handoff file (`$STACK_HANDOFF_DIR/unit-<k>.md`) verbatim in a plain ` ``` ` fence, so the user can copy it in one click. Then say, once: `When a unit is done, paste its STACK REPORT line here.` Do not start sessions, do not offer to start them, and do not print shell commands that start them. Never start a review in this session.
+3. **Log.** `fr-stack.sh` has already written `run.json` (`mode: "stack"`, `verdict: "HANDOFF"`). Append it to the index:
+
+   ```bash
+   . "$RUN_DIR/state.env"; FR_STATUS=handoff bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-log.sh" "$RUN_DIR"
+   ```
+
+4. **Track progress.** The run stays open for the user's reports. When the user pastes a `STACK REPORT` line, or says it in words ("unit 2 is done, request changes, 3 blockers"; "skip unit 4"), record it:
+
+   ```bash
+   . "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-stack-status.sh" "$RUN_DIR" <unit> <verdict> <blockers>
+   ```
+
+   `<verdict>` is the unit's verdict (`APPROVE`, `APPROVE-WITH-COMMENTS`, `REQUEST-CHANGES`, `ARCH-PENDING`) or `SKIPPED`. A unit may be reported again — after fixes, the new verdict replaces the old one. With no unit, the script only prints the status. Then print the status as a short table (unit, PRs, verdict, blockers), then `Stack: <STACK_VERDICT> (<REPORTED> reported)`.
+
+   `STACK_VERDICT` is `REQUEST-CHANGES` as soon as one unit has it, `pending` while any unit is unreported or waits on its architecture gate, `INCOMPLETE` when all reported but one was skipped, and otherwise the weakest verdict of the units. When the stack is complete, name the PRs that still carry blockers. The script only records what the user reports: never read a unit's run directory, and never fill in a verdict nobody reported.
+
+   `REASON` on an error is `no_stack_status` (wrong run directory), `no_such_unit`, `bad_verdict`, or `bad_blockers`. Ask the user to correct the report.
+
+Rules for this step:
+
+- **Do not change the plan by hand.** The grouping is mechanical so that it is the same on every run and testable. If the user wants a different split, they say so and you re-run with the refs they want (`--stack "41,42"` and `--stack "43"`, for example).
+- **Do not add to the handoffs.** No PR titles, no summary of what a PR does, no view on the code. The handoff carries scope and mechanics only. Anything more reaches the review producer as the author's claim, and the next review triages against it.
+- **The units are independent.** They may run in any order or at the same time. Each one runs its own architecture gate, and may stop to ask.
+- **`--codex` carries over** to every handoff when this run had it. `--arch-approved` never does: each unit's architecture is its own decision.
+
 ### Step 1.5: Resolve the PR (pr-remote only)
 
 Skip entirely unless `PR_REF` is set.
@@ -284,6 +366,9 @@ On `PR: unresolved`, **stop and say why.** There is no safe default: falling bac
 - `pr_fetch_failed` — `origin` does not serve `pull/N/head`. Non-GitHub remotes do not.
 - `no_merge_base` — the PR's base branch and head share no history.
 - `worktree_failed` — read `raw/pr-worktree.err`.
+- `since_pr_not_below` — `--since-pr` named a PR that is not below the `--pr` PR in its stack. The walk down the base branches reached trunk (or 30 links) without meeting it.
+
+**With `--since-pr`** (a stack unit), the script walks the stack down from the `--pr` PR to the `--since-pr` PR and records `STACK_PRS` (bottom to top) and `UNIT_BASE` (the bottom PR's base branch). `DIFF_BASE` is the merge-base of `UNIT_BASE` and the top PR's head, so the packet holds the whole unit. Everything else — the worktree, `PR_HEAD`, the verdict vocabulary — is the top PR's.
 
 Two resolved outputs to state out loud:
 
@@ -392,7 +477,7 @@ Run this whenever a PR is discoverable — in **every** mode, not only `pr` mode
 
 `PR_CONTEXT` comes back as exactly one of:
 
-- `present` → a PR was found (already resolved in pr-remote, or discovered from the current branch's open PR in the other modes). `body.md`, `discussion.md`, and `sa-findings.md` are written. Read the printed keys, not the files — the files are for Step 7 (triage) and Pass W, handed on by path.
+- `present` → a PR was found (already resolved in pr-remote, or discovered from the current branch's open PR in the other modes). `body.md`, `discussion.md`, and `sa-findings.md` are written. For a stack unit (`STACK_PRS` holds more than one PR), each file has a section per PR, every thread in `review-comments.json` carries its `pr` number, and the counts cover all of them. Read the printed keys, not the files — the files are for Step 7 (triage) and Pass W, handed on by path.
 - `none` → no PR for this branch. This is the normal default pre-commit case. Feature 1 and 2 simply do not apply; say nothing about them and proceed.
 - `unavailable` → `gh` is missing or a call failed (`REASON` says which). State it once — PR discussion and static-analysis verification are skipped this run — and proceed. It is never a blocker.
 
@@ -972,6 +1057,7 @@ Rules:
 
 - The verdict is the first line of the review block, and the narrative block is the only thing permitted above it. Never bury it under a preamble.
 - The context line carries `risk:` — **Pass K's class** (`low`/`med`/`high`) in `pr` mode, the mechanical `RISK` (`normal`/`HIGH`) in `review` mode. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical)`.
+- For a stack unit the context line names every PR in it and the unit: `PRs #42–#43 @ <short sha> · stack unit 1 of 3`. **The last line of the whole chat output is the stack report** from the handoff, filled in with the verdict and the blocker count: `STACK REPORT — <stack id> · unit 1/3 · PRs #42, #43 · REQUEST-CHANGES · blockers 2`. It is for the user to paste back to the orchestrator, so print it exactly in that shape. On a pending architecture gate, the verdict there is `ARCH-PENDING`.
 - In pr-remote mode the context line names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open, so nobody acts on `REQUEST-CHANGES` for something that already landed.
 - **The `architecture` line always prints.** It tells the reader whether the structure was agreed before the findings below were produced. The diagram and trade-offs were already shown at the gate (Step 4.8); do not print them again here.
 - **The `static analysis` line prints only when Pass W ran** (`SA_PRESENT: 1`). It gives the reader the whole feature-1 answer in one line: how many the tool raised and how they broke down. Its `<unaddressed>` count equals the number of Pass W blockers below. Omit the line entirely when no analyzer findings were on the PR.
@@ -1064,12 +1150,13 @@ This must run even on abort or error. If the user interrupts mid-review, restori
 Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where the **long form** goes: the Step 8 chat output, plus everything trimmed off it (the full narrative sections `NEW OR CHANGED RULES` / `BOUNDARIES AND CONTRACTS` / `NOT IN THIS CHANGE`, the Pass K risk rationale and factor line, the full pass inventory line, the UI-preview line, the structural "not covered here — /ship owns …" note, the PR-context and static-analysis summary, the scope, and the isolation-audit result). Nothing that used to be in chat is lost; it just lives here now. Then write `$RUN_DIR/run.json`:
 
 ```json
-{"skill":"fresh-review","schema":9,"run_id":"<RUN_ID>",
+{"skill":"fresh-review","schema":10,"run_id":"<RUN_ID>",
  "ts_start":"<TS_START>","ts_end":"<now>","duration_s":0,
  "repo":"<repo>","branch":"<BRANCH>","base":"<BASE>",
  "mode":"<review|pr>","codex_requested":false,"codex_reason":"<none|asked|risk|risk-pass>",
  "architecture":{"gate":"<not_needed|approved|rejected|pending|skipped|failed>","decisions":0,"diagram":false},
  "pr":{"number":0,"url":"","state":"","head":"","drift":false},
+ "stack":{"id":"<STACK_ID>","unit":1,"units":1,"prs":[0]},
  "pr_context":{"present":false,"comments":0,"reviews":0,"threads":0,"discussion_lines":0},
  "scope":"<REVIEW_SCOPE>","diff_base":"<DIFF_BASE>","checkpoint":"<CHECKPOINT_SHA>",
  "risk":"<RISK>","risk_level":"<low|med|high>",
@@ -1095,6 +1182,7 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
 - **Set `architecture` from Step 4.8.** `gate` is `skipped` under `--arch-approved`, `failed` when Pass D failed, `not_needed` when Pass D found no decisions, and otherwise the `ARCH_GATE` answer. `decisions` is Pass D's count; `diagram` is whether one was shown. Omit the `architecture` pass when the gate was skipped, and the `eng-review` pass whenever Pass E did not launch (no decisions, gate skipped, or `HAS_GSTACK: 0`). When the gate did not clear, the implementation passes never launched — omit them too, and set `verdict` to `ARCH-PENDING` for a pending gate.
 - Set `codex_requested` from the final `CODEX_REQUESTED` in `state.env` (after Step 4 and Step 6 may have forced it), and `codex_reason` from `CODEX_REASON`. It is what tells cross-run analysis apart: a `codex` pass absent because it was never asked for versus one dropped because it failed.
 - **Omit the `codex` pass from `passes[]` when `codex_requested` is `false`** — a pass that never launched is not a pass that failed, and `codex_requested` already records the choice. When it was requested but failed or was unavailable, keep the entry with `"status":"failed"` so the failure stays visible.
+- **Add `stack` only for a stack unit** — when the handoff gave a stack id. Take `id`, `unit`, and `units` from the handoff and `prs` from `STACK_PRS`. The orchestrator's own entry (`mode: "stack"`) is written by `fr-stack.sh` and carries the whole plan instead.
 - Omit `pr` outside pr-remote mode, and both the `narrative` and `risk` passes outside `pr` mode — an absent pass and a failed one must stay distinguishable. Likewise omit `risk_level` (top-level) and the `ui_preview` object outside `pr` mode; they are pr-mode artifacts. `risk` (the mechanical class) is always present.
 - **Keep the mechanical `risk` and Pass K's `risk_level` distinct.** `risk` is `normal`/`high` from `fr-packet.sh`'s pattern count and gates `/cso` depth; `risk_level` is Pass K's `low`/`med`/`high` judgment and is what the header shows. In `review` mode `risk_level` is absent and only `risk` exists. When the `risk` pass failed, keep its entry with `"status":"failed"` and omit `risk_level`.
 - **Omit the `review` pass from `passes[]` outside pr-remote**, and when `HAS_GSTACK: 0` in pr-remote (it could not run). Keep the entry with `"status":"failed"` only when it launched and failed — same rule as `codex`.
@@ -1121,7 +1209,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - *Is the narrative telling anyone anything?* `narrative.title_mismatch` over many pr-remote runs is the direct measure. If it is never true, the mode is producing pleasant restatements and its isolation is not buying what it costs; if it is often true, PR descriptions in this repo are not to be trusted, which is worth knowing on its own. `narrative.diagram` alongside it says whether the diagram-first mode is actually drawing diagrams or mostly returning `none`.
 - *Does the risk class track reality?* `risk_level` against the triage counts over many runs answers whether the pass is calibrated: `high`-risk runs should not be the ones with zero real bugs *and* zero caution, and a repo where every change comes back `low` has a pass that has stopped discriminating.
 
-**Schema history.** `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
+**Schema history.** `schema:10` adds stack mode: an orchestrator entry with `mode: "stack"`, `verdict: "HANDOFF"`, no passes, and a `stack` object holding the plan; and an optional `stack` object on each unit's review entry linking it back by `id`. Reading a `schema:9` entry, treat `stack` as absent — stack mode did not exist. `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
 
 ## Failure modes and recovery
 
@@ -1163,6 +1251,12 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **The user rejects the architecture** → not a failure. Triage Pass E's findings, verdict `DO-NOT-COMMIT` (pr-remote: `REQUEST-CHANGES`), skip the handoff, restore, log.
 - **Step 5 reached with the gate closed** (`fr-arch-gate.sh` prints `ARCH_GATE: closed`) → launch nothing. Finish Step 4.8 (`not_decided`), or follow its rejected/pending branch.
 - **No one can answer the gate** (AskUserQuestion unavailable or failed) → `ARCH_GATE=pending`. Never assume approval. Print the pending block, restore, log, and point to `--arch-approved`.
+- **`STACK: unresolved`** → stop and print `REASON` (Step S). Never fall back to reviewing a single PR in the orchestrator session.
+- **The stack branches** (`FORK_AT` is set) → not an error. Plan the path to the given PR, say where it branches, and tell the user to run `--stack` with explicit refs for another branch.
+- **A stack report the status script refuses** (`STATUS: error`) → say which part is wrong and ask the user for a corrected report. Never guess a unit or a verdict.
+- **The orchestrator session was closed** → the status file survives in the stack's run directory. In a new session, run `fr-stack-status.sh` on that directory to see where the stack stands and keep reporting.
+- **A stack of one PR** (`NEXT: review_here`) → no plan, no handoff. Re-run Step 1 with `REVIEW_ARGS` and review the PR in this session.
+- **`since_pr_not_below`** → the handoff is stale (the stack was restacked) or hand-typed wrong. Re-run the stack orchestrator to get fresh handoffs.
 - **The session ends while the gate waits** → the checkpoint is still in place. On the next turn run `fr-restore.sh "$RUN_DIR"` first, as for any interrupted run, then ask whether to re-run with `--arch-approved`.
 
 ## What this skill does NOT do
@@ -1212,5 +1306,9 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 **"fresh review"** on a bug fix inside one module → Pass D returns `ARCH_DECISIONS: no`. One line in chat — `Architecture: no design decisions in this change — reviewing the implementation.` — and the run is otherwise unchanged. No question is asked.
 
 **"fresh review, architecture approved"** → `--arch-approved`. Step 4.8 is skipped, and the run goes straight to the fan-out.
+
+**"review the stack for PR 43"** → `--stack "43"`. Step S finds PRs #41 → #45. #42 is 5 lines, so it joins #41 in unit 1 (`--pr 42 --since-pr 41`). #43 touches `auth.py`, so it is high risk and stays alone. #44 starts a new unit above it, and #45 changes different files and is not small, so it stays alone too. Chat gets the plan table and four handoffs to copy. The user opens four new sessions and pastes one handoff into each. No code is reviewed in this session. As each review ends, the user pastes its `STACK REPORT` line back; the orchestrator records it and shows the table — `Stack: REQUEST-CHANGES (2/4 reported)` after unit 2 comes back with blockers, and `Stack: APPROVE-WITH-COMMENTS (4/4 reported)` once the fixes are re-reviewed.
+
+**"review the stack for PR 46"** where #46 has no PR below or above it → `NEXT: review_here`. No plan and no handoff: this session re-runs Step 1 with `--pr 46` and reviews it as usual.
 
 **The PR title says "add refund support"; the narrative says a fee is recorded but never reversed** → the `⚠` mismatch line in Step 8, `title_mismatch: true` in the run log. This is the outcome the whole isolation contract exists to make possible.

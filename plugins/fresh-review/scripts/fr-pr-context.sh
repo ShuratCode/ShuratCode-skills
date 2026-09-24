@@ -86,40 +86,62 @@ SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
 # dismisses a bot finding lives, so they are load-bearing for Pass W, not
 # optional. A failure here degrades to an empty array rather than aborting the
 # whole gather.
-gh api "repos/$SLUG/pulls/$PR_NUM/comments" --paginate \
-  > "$CTX_DIR/review-comments.json" 2>>"$ERR" || printf '[]\n' > "$CTX_DIR/review-comments.json"
-
+#
 # Some analyzers (CodeQL and other SARIF tools especially) report as check runs
 # on the head commit rather than as comments. Fetch them so Pass W sees those too.
-HEAD_SHA="${PR_HEAD:-}"
-[ -z "$HEAD_SHA" ] && HEAD_SHA=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("headRefOid") or "")' \
-  "$CTX_DIR/pr.json" 2>/dev/null)
-if [ -n "$HEAD_SHA" ]; then
-  gh api "repos/$SLUG/commits/$HEAD_SHA/check-runs" \
-    > "$CTX_DIR/check-runs.json" 2>>"$ERR" || printf '{"check_runs":[]}\n' > "$CTX_DIR/check-runs.json"
+gather_threads_and_checks() { # pr-number  dir  head-sha
+  gh api "repos/$SLUG/pulls/$1/comments" --paginate \
+    > "$2/review-comments.json" 2>>"$ERR" || printf '[]\n' > "$2/review-comments.json"
+  local head="$3"
+  [ -z "$head" ] && head=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("headRefOid") or "")' \
+    "$2/pr.json" 2>/dev/null)
+  if [ -n "$head" ]; then
+    gh api "repos/$SLUG/commits/$head/check-runs" \
+      > "$2/check-runs.json" 2>>"$ERR" || printf '{"check_runs":[]}\n' > "$2/check-runs.json"
+  else
+    printf '{"check_runs":[]}\n' > "$2/check-runs.json"
+  fi
+}
+
+PRS="${STACK_PRS:-$PR_NUM}"
+set -- $PRS
+UNITS=()
+if [ "$#" -le 1 ]; then
+  gather_threads_and_checks "$PR_NUM" "$CTX_DIR" "${PR_HEAD:-}"
+  UNITS=("$PR_NUM:$CTX_DIR")
 else
-  printf '{"check_runs":[]}\n' > "$CTX_DIR/check-runs.json"
+  for n in "$@"; do
+    sub="$CTX_DIR/pr-$n"
+    mkdir -p "$sub"
+    if [ "$n" = "$PR_NUM" ]; then
+      cp "$CTX_DIR/pr.json" "$sub/pr.json"
+      gather_threads_and_checks "$n" "$sub" "${PR_HEAD:-}"
+    else
+      gh pr view "$n" --json number,url,state,title,body,comments,reviews,headRefOid \
+        > "$sub/pr.json" 2>>"$ERR" || skip unavailable gh_pr_view_failed
+      gather_threads_and_checks "$n" "$sub" ""
+    fi
+    UNITS+=("$n:$sub")
+  done
 fi
 
 # Reduce the raw JSON into the two producer artifacts (body.md, discussion.md)
 # and the one Pass-W artifact (sa-findings.md), and print the counts the
 # orchestrator needs. Content never crosses back through stdout — only integers
 # and the detected tool names.
-SUMMARY=$(python3 - "$CTX_DIR" <<'PY'
+SUMMARY=$(python3 - "$CTX_DIR" "${UNITS[@]}" <<'PY'
 import json, os, re, sys
 
 ctx = sys.argv[1]
+units = [u.split(":", 1) for u in sys.argv[2:]]
+stacked = len(units) > 1
 
-def load(name, default):
+def load(d, name, default):
     try:
-        with open(os.path.join(ctx, name)) as fh:
+        with open(os.path.join(d, name)) as fh:
             return json.load(fh)
     except Exception:
         return default
-
-pr = load("pr.json", {})
-threads = load("review-comments.json", [])
-checks = load("check-runs.json", {}).get("check_runs", []) or []
 
 # Security / code-analysis tools whose PR comments and checks Pass W must verify.
 # Deliberately excludes dependency-update bots (dependabot, renovate) — those
@@ -153,81 +175,103 @@ def tool_match(*fields):
 tools = set()
 sa_blocks = []
 disc_lines = []
-
-body = pr.get("body") or ""
-with open(os.path.join(ctx, "body.md"), "w") as fh:
-    fh.write(body.strip() + "\n" if body.strip() else "(no description)\n")
-
-comments = pr.get("comments") or []
-for c in comments:
-    login = actor(c, "author")
-    tool = tool_match(login, c.get("body", ""))
-    line = f"[comment] {login or 'unknown'}: {(c.get('body') or '').strip()}"
-    disc_lines.append(line)
-    if tool:
-        tools.add(tool)
-        sa_blocks.append(f"### tool comment — {login} ({tool})\n{(c.get('body') or '').strip()}\n")
-
-reviews = pr.get("reviews") or []
-for r in reviews:
-    login = actor(r, "author")
-    st = r.get("state") or ""
-    b = (r.get("body") or "").strip()
-    if b:
-        disc_lines.append(f"[review:{st}] {login or 'unknown'}: {b}")
-    tool = tool_match(login, b)
-    if tool and b:
-        tools.add(tool)
-        sa_blocks.append(f"### tool review — {login} ({tool})\n{b}\n")
-
-# Inline threads: group replies under their root so a human dismissal of a bot
-# finding travels with the finding it dismisses.
-by_id = {t.get("id"): t for t in threads if isinstance(t, dict)}
-roots = {}
-for t in threads:
-    if not isinstance(t, dict):
-        continue
-    root = t.get("in_reply_to_id") or t.get("id")
-    roots.setdefault(root, []).append(t)
-
+bodies = []
+all_threads = []
+comment_total = 0
+review_total = 0
 thread_count = 0
-for root_id, msgs in roots.items():
-    thread_count += 1
-    head = by_id.get(root_id, msgs[0])
-    hlogin = actor(head, "user", "author")
-    path = head.get("path") or ""
-    ln = head.get("line") or head.get("original_line") or ""
-    loc = f"{path}:{ln}" if path else ""
-    tool = tool_match(hlogin, head.get("body", ""))
-    rendered = []
-    for m in msgs:
-        mlogin = actor(m, "user", "author")
-        rendered.append(f"  - {mlogin or 'unknown'}: {(m.get('body') or '').strip()}")
-    disc_lines.append(f"[thread] {loc} {hlogin or 'unknown'}:\n" + "\n".join(rendered))
-    if tool:
+check_hits = 0
+
+for number, d in units:
+    pr = load(d, "pr.json", {})
+    threads = load(d, "review-comments.json", [])
+    checks = load(d, "check-runs.json", {}).get("check_runs", []) or []
+    tag = f"PR #{number} " if stacked else ""
+
+    body = (pr.get("body") or "").strip()
+    if stacked:
+        bodies.append(f"## PR #{number}\n\n" + (body or "(no description)"))
+    elif body:
+        bodies.append(body)
+
+    comments = pr.get("comments") or []
+    comment_total += len(comments)
+    for c in comments:
+        login = actor(c, "author")
+        tool = tool_match(login, c.get("body", ""))
+        line = f"[{tag}comment] {login or 'unknown'}: {(c.get('body') or '').strip()}"
+        disc_lines.append(line)
+        if tool:
+            tools.add(tool)
+            sa_blocks.append(f"### {tag}tool comment — {login} ({tool})\n{(c.get('body') or '').strip()}\n")
+
+    reviews = pr.get("reviews") or []
+    review_total += len(reviews)
+    for r in reviews:
+        login = actor(r, "author")
+        st = r.get("state") or ""
+        b = (r.get("body") or "").strip()
+        if b:
+            disc_lines.append(f"[{tag}review:{st}] {login or 'unknown'}: {b}")
+        tool = tool_match(login, b)
+        if tool and b:
+            tools.add(tool)
+            sa_blocks.append(f"### {tag}tool review — {login} ({tool})\n{b}\n")
+
+    # Inline threads: group replies under their root so a human dismissal of a bot
+    # finding travels with the finding it dismisses.
+    by_id = {t.get("id"): t for t in threads if isinstance(t, dict)}
+    roots = {}
+    for t in threads:
+        if not isinstance(t, dict):
+            continue
+        all_threads.append(dict(t, pr=int(number)) if stacked else t)
+        root = t.get("in_reply_to_id") or t.get("id")
+        roots.setdefault(root, []).append(t)
+
+    for root_id, msgs in roots.items():
+        thread_count += 1
+        head = by_id.get(root_id, msgs[0])
+        hlogin = actor(head, "user", "author")
+        path = head.get("path") or ""
+        ln = head.get("line") or head.get("original_line") or ""
+        loc = f"{path}:{ln}" if path else ""
+        tool = tool_match(hlogin, head.get("body", ""))
+        rendered = []
+        for m in msgs:
+            mlogin = actor(m, "user", "author")
+            rendered.append(f"  - {mlogin or 'unknown'}: {(m.get('body') or '').strip()}")
+        disc_lines.append(f"[{tag}thread] {loc} {hlogin or 'unknown'}:\n" + "\n".join(rendered))
+        if tool:
+            tools.add(tool)
+            sa_blocks.append(
+                f"### {tag}tool thread — {hlogin} ({tool}) at {loc or 'unknown location'}\n"
+                + "\n".join(rendered) + "\n"
+            )
+
+    for ch in checks:
+        name = ch.get("name") or ""
+        app = ch.get("app") or {}
+        app_slug = app.get("slug") or app.get("name") or "" if isinstance(app, dict) else ""
+        tool = tool_match(name, app_slug)
+        if not tool:
+            continue
+        concl = ch.get("conclusion") or ch.get("status") or ""
+        out = ch.get("output") or {}
+        title = out.get("title") or ""
+        summary = out.get("summary") or ""
         tools.add(tool)
+        check_hits += 1
         sa_blocks.append(
-            f"### tool thread — {hlogin} ({tool}) at {loc or 'unknown location'}\n"
-            + "\n".join(rendered) + "\n"
+            f"### {tag}tool check — {name} ({tool}) conclusion={concl}\n{title}\n{summary}\n"
         )
 
-check_hits = 0
-for ch in checks:
-    name = ch.get("name") or ""
-    app = ch.get("app") or {}
-    app_slug = app.get("slug") or app.get("name") or "" if isinstance(app, dict) else ""
-    tool = tool_match(name, app_slug)
-    if not tool:
-        continue
-    concl = ch.get("conclusion") or ch.get("status") or ""
-    out = ch.get("output") or {}
-    title = out.get("title") or ""
-    summary = out.get("summary") or ""
-    tools.add(tool)
-    check_hits += 1
-    sa_blocks.append(
-        f"### tool check — {name} ({tool}) conclusion={concl}\n{title}\n{summary}\n"
-    )
+with open(os.path.join(ctx, "body.md"), "w") as fh:
+    fh.write("\n\n".join(bodies) + "\n" if bodies else "(no description)\n")
+
+if stacked:
+    with open(os.path.join(ctx, "review-comments.json"), "w") as fh:
+        json.dump(all_threads, fh)
 
 with open(os.path.join(ctx, "discussion.md"), "w") as fh:
     fh.write("\n\n".join(disc_lines).strip() + "\n" if disc_lines else "(no discussion)\n")
@@ -237,8 +281,8 @@ with open(os.path.join(ctx, "sa-findings.md"), "w") as fh:
 
 sa_signal = len(sa_blocks)
 disc_line_count = sum(len(x.splitlines()) for x in disc_lines)
-print(f"COMMENT_COUNT={len(comments)}")
-print(f"REVIEW_COUNT={len(reviews)}")
+print(f"COMMENT_COUNT={comment_total}")
+print(f"REVIEW_COUNT={review_total}")
 print(f"THREAD_COUNT={thread_count}")
 print(f"CHECK_HITS={check_hits}")
 print(f"DISCUSSION_LINES={disc_line_count}")
