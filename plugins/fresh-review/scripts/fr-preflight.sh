@@ -17,6 +17,7 @@
 #   STATUS: ok | stop
 #   STOP_REASON: <slug>            (only when STATUS: stop)
 #   PLUGIN_ROOT                    (the running copy's root, also in state.env)
+#   PLUGIN_VERSION / PLUGIN_INSTALLED / PLUGIN_STALE   (the running copy's version vs the newest install)
 #   RUN_DIR / STATE / MODE / PR_REF / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE
 #   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / ARCH_APPROVED / DELTA_REQUESTED / CODEX_CFG / GSTACK_BIN
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_CMD
@@ -72,6 +73,24 @@ fi
 # restores it by sourcing state.env — the orchestrator only has to resolve the
 # root once, for this bootstrap call (SKILL.md Step 0). Same shape as vendor.sh.
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+{ read -r PLUGIN_VERSION; read -r PLUGIN_INSTALLED; read -r PLUGIN_STALE; } < <(
+  python3 - "$PLUGIN_ROOT/.claude-plugin/plugin.json" \
+    "$HOME/.claude/plugins/cache/ShuratCode-skills/fresh-review" <<'PY'
+import json, os, sys
+manifest, cache = sys.argv[1:3]
+def key(v):
+    return tuple(int(p) if p.isdigit() else 0 for p in v.split("."))
+try:
+    running = json.load(open(manifest))["version"]
+except Exception:
+    running = "unknown"
+dirs = [d for d in os.listdir(cache) if os.path.isdir(os.path.join(cache, d))] if os.path.isdir(cache) else []
+installed = max(dirs, key=key, default="none")
+print(running)
+print(installed)
+print("yes" if running != "unknown" and installed != "none" and key(installed) > key(running) else "no")
+PY
+)
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   emit "=== FRESH-REVIEW PREFLIGHT ==="
@@ -171,6 +190,7 @@ STATE="$RUN_DIR/state.env"
 kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
 {
   kv CLAUDE_PLUGIN_ROOT "$PLUGIN_ROOT"
+  kv FR_VERSION "$PLUGIN_VERSION"
   kv REPO_ROOT "$REPO_ROOT"
   kv SOURCE_ROOT "$REPO_ROOT"
   kv MODE "$MODE"
@@ -205,6 +225,9 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
 emit "=== FRESH-REVIEW PREFLIGHT ==="
 emit "STATUS: ok"
 emit "PLUGIN_ROOT: $PLUGIN_ROOT"
+emit "PLUGIN_VERSION: $PLUGIN_VERSION"
+emit "PLUGIN_INSTALLED: $PLUGIN_INSTALLED"
+emit "PLUGIN_STALE: $PLUGIN_STALE"
 emit "RUN_DIR: $RUN_DIR"
 emit "STATE: $STATE"
 emit "MODE: $MODE"

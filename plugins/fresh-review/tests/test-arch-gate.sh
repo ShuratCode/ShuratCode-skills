@@ -40,6 +40,10 @@ want "$OUT" ARCH_GATE closed "unknown gate value"
 OUT="$(gate approved "ARCH_APPROVED='0'" "ARCH_GATE='approved'")"
 want "$OUT" ARCH_GATE open "gate approved"
 
+OUT="$(gate carried "ARCH_APPROVED='0'" "ARCH_GATE='carried'")"
+want "$OUT" ARCH_GATE open "approval carried from the last review"
+want "$OUT" REASON approved_at_last_review "approval carried from the last review"
+
 OUT="$(gate notneeded "ARCH_APPROVED='0'" "ARCH_GATE='not_needed'")"
 want "$OUT" ARCH_GATE open "no architecture decisions"
 
