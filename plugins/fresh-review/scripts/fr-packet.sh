@@ -8,6 +8,7 @@
 # Output contract (stdout):
 #   === FRESH-REVIEW PACKET ===
 #   FILES / LINES / INS / DEL / RISK / PATH_HITS / BODY_HITS / IAC_HITS
+#   CODEX_REQUESTED / CODEX_REASON
 #   === END ===
 
 set -u
@@ -47,6 +48,13 @@ if [ "$PATH_HITS" -gt 0 ] || [ "$IAC_HITS" -gt 0 ] || [ "$BODY_HITS" -gt 3 ] || 
   RISK=high
 fi
 
+CODEX_REQUESTED="${CODEX_REQUESTED:-0}"
+CODEX_REASON="${CODEX_REASON:-none}"
+if [ "$RISK" = high ] && [ "$CODEX_REQUESTED" != 1 ]; then
+  CODEX_REQUESTED=1
+  CODEX_REASON=risk
+fi
+
 {
   echo "SCOPE=$REVIEW_SCOPE"
   echo "DIFF_CMD=$DIFF_CMD"
@@ -67,6 +75,8 @@ fi
   echo "INS='$INS'"
   echo "DEL='$DEL'"
   echo "RISK='$RISK'"
+  echo "CODEX_REQUESTED='$CODEX_REQUESTED'"
+  echo "CODEX_REASON='$CODEX_REASON'"
 } >> "$STATE"
 
 printf '%s\n' "=== FRESH-REVIEW PACKET ===" \
@@ -78,4 +88,6 @@ printf '%s\n' "=== FRESH-REVIEW PACKET ===" \
   "PATH_HITS: $PATH_HITS" \
   "BODY_HITS: $BODY_HITS" \
   "IAC_HITS: $IAC_HITS" \
+  "CODEX_REQUESTED: $CODEX_REQUESTED" \
+  "CODEX_REASON: $CODEX_REASON" \
   "=== END ==="
