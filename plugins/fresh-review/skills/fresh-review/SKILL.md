@@ -46,6 +46,11 @@ description: |
   the same session. Use it when the user asks to "review this stack", "review the stack for PR
   42", "review PRs 41 42 43", "review my stacked PRs", or names two or more PRs to review.
 
+  PR reviews and stack units also support a **re-review** (`--delta`). After a first review and the
+  author's fixes, it reviews only what changed since the last review, and checks that each earlier
+  blocker is fixed. Use it when the user asks to "re-review PR 42", "review PR 42 again", "review
+  the fixes on PR 42", or "re-review unit 2" of a stack.
+
   This is the right tool whenever the producer-Claude and the reviewer-Claude would otherwise be the
   same instance with the same context — the entire point is to break that bias. Do NOT call
   /lattice:review or /cso directly when the user wants fresh eyes; those run inside the producer
@@ -80,6 +85,7 @@ Two output shapes, one machine. Every mode fans out the same critic passes again
 | "pr review", "explain this PR", "what does this change do", "write the PR description" | `--mode pr` | your branch | **the graph** + **one-paragraph summary** + verdict + findings |
 | "review PR 42", a `github.com/…/pull/42` URL | `--pr 42` | PR 42's head commit | **the graph** + **one-paragraph summary** + verdict + findings |
 | "review this stack", "review the stack for PR 42", "review PRs 41 42 43" | `--stack "<refs>"` | nothing — this session only plans | **the plan** + **one handoff per review** |
+| "re-review PR 42", "review PR 42 again", "review the fixes on PR 42" | `--pr 42 --delta` | only what changed on PR 42 since its last review | **the graph** + **one-paragraph summary** + verdict + findings |
 
 The chat output is deliberately lean — the graph (rendered, not its source), one short paragraph, the verdict, the comments. The risk class, the risk factor breakdown, the full narrative sections, the pass inventory, and the coverage notes are written to `report.md`, not printed. Whenever the review subject has an associated PR (always in pr-remote; auto-discovered on your own branch), the run also gathers PR context (Step 4.7) and, if the PR carried static-analysis findings, adds one static-analysis summary line and verifies each finding was handled (Pass W).
 
@@ -88,6 +94,7 @@ Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do
 - **Explicit flags win.** When the request already carries `--pr`, `--since-pr`, or `--stack`, pass them through verbatim and do not re-read the numbers in it. A stack handoff starts with `--pr 43 --since-pr 42`: that is one pr-remote review, not a stack.
 - The word **stack**, or **two or more** PR numbers or pull URLs, means `--stack "<the refs>"`. One ref with the word stack ("review the stack for PR 42") is enough: the script finds the rest of the stack.
 - A **number or pull URL** anywhere in the request means `--pr <that>` — which implies `--mode pr`.
+- **Re-review words** with a PR ref — "re-review", "review again", "review the fixes", "only what changed since the last review" — add `--delta`. With no PR ref there is nothing to re-review against: say that re-review works for PRs and stack units only, and run the normal review.
 - Any plain-English *"what does this do"* framing means `--mode pr` with no PR ref: same branch, same passes, plus the narrative.
 - Everything else is the default. When in doubt, default. The narrative is additive, so guessing `review` costs the user a paragraph; guessing `pr` on a plain pre-commit check costs a subagent.
 
@@ -153,7 +160,21 @@ A stack is a chain of PRs where each PR's base branch is the head branch of the 
 
 Otherwise it starts a new unit. Every decision carries a one-line reason, which goes to the plan and the handoff.
 
+**A re-review of a unit** uses its re-review handoff, which is the same handoff plus `--delta` (see "Re-review: only the delta").
+
 **A combined unit is one pr-remote review of a range.** Its handoff runs `--pr <top> --since-pr <bottom>`. `fr-pr-resolve.sh` walks the stack down from the top PR to the bottom one, and the diff runs from the bottom PR's base branch to the top PR's head. Step 4.7 gathers the description, discussion, and static-analysis findings of **every** PR in the unit, so Pass W checks them all.
+
+### Re-review: only the delta
+
+**pr-remote and stack units only.** After the first review, the author pushes fixes, and the user asks for a re-review. `--delta` then reviews only what changed since the last review of that PR, not the whole PR again.
+
+1. **Every finished pr-remote review is recorded** (Step 10). `fr-review-record.sh` writes the PR head it reviewed, the merge-base, the verdict, the open blockers, the risk class, and whether the run had full coverage to `$LOG_DIR/reviews/<key>.json`. It pins both commits with refs under `refs/fresh-review/reviewed/<key>/`, updated in one transaction, so a force-push cannot lose them. `fr-delta.sh` checks that the refs and the record agree before it trusts either. The key is `pr-<n>`, or `pr-<top>-since-<bottom>` for a combined stack unit.
+2. **The delta is the author's changes only** (Step 1.6). `fr-delta.sh` replays the PR as it was at the last review onto the PR's current base (`git merge-tree`), and diffs that against the new head. So a rebase or a merge of `main` does not show `main`'s changes as if the author made them. It builds two local commits for this and moves the PR worktree onto the second one. Its files are the PR head's files, so reviewers read the right code, and Codex and `/review` see the delta through `DIFF_BASE..HEAD`.
+3. **The earlier blockers are checked** (Pass F). One isolated pass reads the last review's blockers and the current code, and reports the ones that are still open. An open one stays a blocker (Step 7).
+
+Everything else runs as usual on the delta: the architecture gate, the critics, the `pr` mode passes, Pass R, and Pass W. The risk class is the delta's risk, with one floor: when the last review was high risk, the re-review is high risk too, so Codex and `/cso --comprehensive` still run on a small fix to a high-risk PR.
+
+When a delta is not possible, the skill says why and does the safe thing. With no earlier review, a record it cannot trust, an earlier review that lost a lens, or an old PR that no longer applies to the new base, it runs a full review. With no new changes since the last review, it stops. See Step 1.6.
 
 ## Configuration
 
@@ -173,6 +194,7 @@ FR_HANDOFF_CMD="/fresh-review:review"    # stack mode: the command each handoff 
 - **The diagram narrative and risk class are `pr` mode only.** Pass N draws the changed flow as a Mermaid diagram (rendered to PNG via `mmdc` when it is on `PATH`, otherwise printed as a fenced block); Pass K classifies the change `low`/`med`/`high`. Neither runs in the default pre-commit mode, which stays lean. The mechanical `RISK` (`normal`/`high`) from `fr-packet.sh` is unchanged and still gates `/cso` depth in every mode — it is a separate signal from Pass K's class.
 - **UI presence check is `pr`-mode only and never launches anything.** `fr-ui-detect.sh` reports whether the diff touches frontend UI and Step 4.6 prints one `UI preview — not shown: <reason>` line. It does **not** launch an app or take screenshots: a review tree may hold untrusted code and provenance is not mechanically decidable, so auto-launching it is an RCE risk (Step 4.6, "Why UI preview does not launch"). It never blocks the verdict.
 - **The architecture gate runs in every mode** (Step 4.8), before the fan-out. Pass D decides whether there are architecture design decisions; only when there are does Pass E (`/plan-eng-review`, report-only, architecture section) run and the user get asked to approve. `--arch-approved` skips it. The architecture diagram is rendered via `mmdc` like Pass N's, with the same fence fallback.
+- **Re-review is `--delta`, and works for pr-remote and stack units only** (see "Re-review: only the delta"). Records live in `$LOG_DIR/reviews/`, next to `runs.jsonl`, and are never pruned.
 - **PR context and static-analysis verification are producer-side and run whenever a PR exists.** `fr-pr-context.sh` (Step 4.7) gathers the PR's description, human discussion, and any static-analysis bot findings (Wiz, Snyk, SonarCloud, CodeQL, …) into `$RUN_DIR/pr-context/` — for triage and Pass W only, never for the isolated passes. When the PR carried analyzer findings (`SA_PRESENT: 1`), Pass W (Step 5) verifies each was fixed, suppressed, or dismissed, and an unaddressed one becomes a blocker under the static-analysis floor (Step 7). Both need `gh`; with no PR or no `gh` they self-skip cleanly and the run is unchanged.
 
 ## Why gstack's `/review` is not a pass here
@@ -219,7 +241,7 @@ The same principle governs the shell work: every mechanical step is a script in 
 
 ## Workflow
 
-Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. In stack mode only Steps 0, 1, and **S** run — Step S replaces the rest, except for a stack of one PR, which Step S turns back into a normal `--pr` run. Otherwise, steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **4.8** (architecture gate) runs in every mode unless `--arch-approved` and can end the run before Step 5, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
+Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. In stack mode only Steps 0, 1, and **S** run — Step S replaces the rest, except for a stack of one PR, which Step S turns back into a normal `--pr` run. Otherwise, steps are mode-conditional where their heading says so: **1.5**, **1.6**, and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **4.8** (architecture gate) runs in every mode unless `--arch-approved` and can end the run before Step 5, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
@@ -264,6 +286,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --arch-approved    # skip t
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --stack "42"       # stack mode: find the stack around PR 42
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --stack "41,42,43" # stack mode: exactly these PRs
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 43 --since-pr 42  # one review of PRs 42..43 (a stack unit)
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42 --delta     # re-review: only what changed since the last review
 ```
 
 <!-- FR:BOOTSTRAP:START -->
@@ -290,6 +313,7 @@ Tool-availability accounting — state each of these up front, never silently:
 - `CODEX_REQUESTED: 1` with `HAS_CODEX: 0` → Codex was asked for but `codex` is not on PATH, so Pass C **cannot** run. Say so plainly, run the Claude critics, label the verdict reduced-lens, and do not substitute a Claude pass for it. Fix is `codex login` (or installing the CLI) and re-run.
 - `CODEX_REQUESTED: 1` with `HAS_CODEX: 1` → Pass C runs (Step 5).
 - `HAS_GH: 0` → pr-remote is impossible. Only matters when a PR ref was given; Step 1.5 stops on it.
+- `DELTA_REQUESTED: 1` → the user asked for a re-review. Step 1.6 decides whether a delta is possible. `--delta` without `--pr` is rejected with exit 2.
 - `ARCH_APPROVED: 1` → the user already approved the architecture; Step 4.8 is skipped. `ARCH_APPROVED: 0` is the default and the gate runs. Pass E needs gstack: with `HAS_GSTACK: 0` the gate still detects and shows the architecture (Pass D) and still asks, but without the `/plan-eng-review` findings — say so at the gate.
 - `CODEX_CFG: unknown` → `gstack-config` was not found, so the setting could not be read. Report unknown, never guess `enabled`. This setting gates *gstack's* internal Codex, not ours; Pass C runs on `CODEX_REQUESTED` and `HAS_CODEX`, never on this.
 
@@ -336,12 +360,15 @@ On `STACK: resolved` with `NEXT: handoff`, print the plan, then the handoffs, an
 
    `REASON` on an error is `no_stack_status` (wrong run directory), `no_such_unit`, `bad_verdict`, or `bad_blockers`. Ask the user to correct the report.
 
+5. **Re-review a unit.** When a unit comes back `REQUEST-CHANGES`, say once: `When the fixes are pushed, ask me to re-review unit <k>.` When the user asks ("re-review unit 2", "unit 2 has fixes"), print a `Unit <k> of <n> — re-review` heading and the file `$STACK_HANDOFF_DIR/unit-<k>-rereview.md` verbatim in a plain fence. It is the unit's handoff plus `--delta`: the new session reviews only what changed since that unit's last review and checks the earlier blockers. Its `STACK REPORT` line replaces the unit's old verdict, as in item 4. Never start the re-review here.
+
 Rules for this step:
 
 - **Do not change the plan by hand.** The grouping is mechanical so that it is the same on every run and testable. If the user wants a different split, they say so and you re-run with the refs they want (`--stack "41,42"` and `--stack "43"`, for example).
 - **Do not add to the handoffs.** No PR titles, no summary of what a PR does, no view on the code. The handoff carries scope and mechanics only. Anything more reaches the review producer as the author's claim, and the next review triages against it.
 - **The units are independent.** They may run in any order or at the same time. Each one runs its own architecture gate, and may stop to ask.
 - **`--codex` carries over** to every handoff when this run had it. `--arch-approved` never does: each unit's architecture is its own decision.
+- **A re-review keeps the unit as planned.** Do not re-plan the stack to re-review one unit. If the user restacked and a re-review handoff fails with `since_pr_not_below`, re-run the orchestrator.
 
 ### Step 1.5: Resolve the PR (pr-remote only)
 
@@ -376,6 +403,23 @@ Two resolved outputs to state out loud:
 - `PR_STATE` — `MERGED` and `CLOSED` are reviewable (narrating a merged PR is a legitimate use). Just say which, so nobody acts on a `REQUEST-CHANGES` for a PR that landed last week.
 
 **The PR title is fetched and deliberately withheld from every isolated pass.** It is in `$RUN_DIR/pr.json`, and it goes in the Step 8 header for the human to read — but never into the packet or an isolated subagent prompt. The title is the author's claim about the change; Pass N's entire value is deriving the change from the code independently, and a divergence between the two is a finding rather than an input. The body, the human discussion, and any static-analysis bot findings are fetched too — but by **Step 4.7** (`fr-pr-context.sh`) into `$RUN_DIR/pr-context/`, which is producer-only: it feeds triage and the static-analysis verification (Pass W), and is on every isolated pass's forbidden-reads list. The critics and the narrator never see it; that separation is what the "Keep passes blind" design turns on.
+
+### Step 1.6: Resolve the delta (pr-remote only)
+
+Skip unless `PR_REF` is set. Run it on every pr-remote run, with or without `--delta`:
+
+```bash
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-delta.sh" "$RUN_DIR"
+```
+
+It reads the record of the last finished review of this PR (or stack unit), keyed by `REVIEW_KEY`. `DELTA` comes back as one of:
+
+- `off` — no `--delta`. Nothing changes. When `PRIOR_REVIEW` is not `none`, say once: `PR #<n> was reviewed before at <PRIOR_HEAD short sha> (<PRIOR_VERDICT>). Say "re-review" to review only the changes since then.` Then go on with the full review.
+- `applied` — the delta is ready. The script has overwritten `DIFF_BASE` and `DIFF_CMD` in `state.env` and moved the PR worktree to `DELTA_HEAD` (same files as `PR_HEAD`). It wrote the earlier blockers to `$RUN_DIR/delta/prior-blockers.md` for Pass F. Say: `Re-review: only the changes since the last review at <PRIOR_HEAD short sha> (<PRIOR_VERDICT>, <PRIOR_BLOCKERS> blockers).` When `DELTA_KIND` is `rebased`, add: `The PR was rebased or merged with its base since then; the base's own changes are left out.`
+- `full` — a delta was asked for but is not possible. Say why in one line and run the full review. `DELTA_REASON` is `no_prior_review` (no finished review of this PR is recorded here), `record_invalid` (the record is not valid JSON or has malformed blockers), `record_mismatch` (the refs and the record describe different reviews — a record write was interrupted), `prior_reduced_coverage` (the last review lost a lens, so its code was never fully reviewed), `prior_head_missing` (the record's commits are gone), `rebased_with_blockers` (the base moved and the PR's own changes are the same, but earlier blockers are open — the new base may have fixed them, so the whole PR is checked again), `replay_conflict` (the old PR no longer applies cleanly to the new base, so the author's changes cannot be separated from the base's), `replay_failed` (git could not replay it — `raw/delta-replay.err`), or `worktree_failed` (`raw/delta-checkout.err`).
+- `none` — there is nothing new to review. `DELTA_REASON` is `no_new_commits` (the same head on the same base as last time), `no_net_change` (new commits on the same base that cancel out, such as a push and its revert), or `rebase_only` (the PR was rebased or retargeted, its own changes are the same, and no earlier blocker is open). Say `Nothing to re-review on PR #<n>: <reason>. Last review: <PRIOR_VERDICT>, <PRIOR_BLOCKERS> blockers.` Then run Step 9 to remove the PR worktree, and stop. No log entry.
+
+The record is written only at the end of a finished review (Step 10), so a run that stopped at the architecture gate does not count as the last review.
 
 ### Step 2: State the scope
 
@@ -640,7 +684,7 @@ Runs only after Step 4.8 cleared: no architecture decisions, the gate was skippe
 
 `ARCH_GATE: open` → launch the fan-out below. `ARCH_GATE: closed` → **launch nothing.** `REASON` is `rejected` or `pending` (follow Step 4.8c's branch for it) or `not_decided` (Step 4.8 did not finish — go back and finish it). There is no override: the only ways to open the gate are the user's approval, a Pass D result, or `--arch-approved`.
 
-Launch the Claude subagents **in a single message** — two in `review` mode (Pass A, Pass B), four in `pr` mode (adds Pass N narrative and Pass K risk), and five in pr-remote when `HAS_GSTACK: 1` (adds Pass R, the review army) — **plus Pass W (static-analysis verification) in any mode when `SA_PRESENT: 1`, and, only when `CODEX_REQUESTED: 1` (asked for, or forced by `RISK: high`), the Codex background command in the same message.** When Codex was not requested there is no Pass C to launch; the fan-out is Claude-only and everything downstream treats Codex as absent. When `SA_PRESENT: 0` there is no Pass W — the PR raised no analyzer findings, or there is no PR. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N, Pass K, and Pass W are cheap enough that adding them changes wall time by roughly nothing.
+Launch the Claude subagents **in a single message** — two in `review` mode (Pass A, Pass B), four in `pr` mode (adds Pass N narrative and Pass K risk), and five in pr-remote when `HAS_GSTACK: 1` (adds Pass R, the review army) — **plus Pass W (static-analysis verification) in any mode when `SA_PRESENT: 1`, plus Pass F (fix check) on a re-review when `DELTA: applied` and `DELTA_PRIOR_BLOCKERS` is above 0, and, only when `CODEX_REQUESTED: 1` (asked for, or forced by `RISK: high`), the Codex background command in the same message.** When Codex was not requested there is no Pass C to launch; the fan-out is Claude-only and everything downstream treats Codex as absent. When `SA_PRESENT: 0` there is no Pass W — the PR raised no analyzer findings, or there is no PR. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N, Pass K, and Pass W are cheap enough that adding them changes wall time by roughly nothing.
 
 **Pass W is not isolated, and it is launched in this same batch anyway.** It is the one pass that is *supposed* to read PR context — that is its whole job — so it takes a different contract (below) and is exempt from the forbidden-reads audit in Step 6. It reads `$RUN_DIR/pr-context/` and the packet; the isolated passes never touch either half of that.
 
@@ -656,7 +700,9 @@ Every subagent prompt opens with this **isolation contract**, verbatim:
 >
 > Read `diff.patch` first. Open a source file only when the diff alone cannot tell you whether something is a defect — not to browse. **Open it from `{{SOURCE_ROOT}}`, which may not be your working directory:** in a PR review it is a detached checkout of the PR head, and the same path in your own tree holds a different commit's contents. Every path in the diff is relative to that root.
 >
-> **Forbidden reads** — do not open these even if they look relevant, *and do not open them because a skill you invoke tells you to*: `{{RUN_DIR}}/pr-context/**` (the PR description, discussion, and bot findings — producer-only, and reading it turns your independent judgment into a restatement of the author's claim), `.lattice/requirements/**`, `.lattice/context/**`, `.lattice/contexts/**`, `.lattice/reviews/**`, `*.plan.md`, `*.design.md`, `docs/decisions/**`, `TODOS.md`, `ONBOARDING.md`, anything under `~/.gstack/projects/**`, and any file whose purpose is to record intent rather than behavior. **Forbidden commands**: `gh pr view`, `gh issue view`, `gh pr diff --body`, `git log`. Allowed: `.lattice/standards/**`, `.lattice/learnings/**`, `.lattice/config.yaml`, `AGENTS.md`/`CLAUDE.md`, and the diffed source. (Learnings are repo-wide rules, not this change's intent — read them, never write them.)
+> When `scope.txt` has `DELTA=since-last-review`, the diff holds only what changed since an earlier review of this PR. Review the diff. Open unchanged code only to judge a changed line.
+>
+> **Forbidden reads** — do not open these even if they look relevant, *and do not open them because a skill you invoke tells you to*: `{{RUN_DIR}}/pr-context/**` (the PR description, discussion, and bot findings — producer-only, and reading it turns your independent judgment into a restatement of the author's claim), `{{RUN_DIR}}/delta/**` (the last review's findings — reading them anchors you to that review instead of this diff), `.lattice/requirements/**`, `.lattice/context/**`, `.lattice/contexts/**`, `.lattice/reviews/**`, `*.plan.md`, `*.design.md`, `docs/decisions/**`, `TODOS.md`, `ONBOARDING.md`, anything under `~/.gstack/projects/**`, and any file whose purpose is to record intent rather than behavior. **Forbidden commands**: `gh pr view`, `gh issue view`, `gh pr diff --body`, `git log`. Allowed: `.lattice/standards/**`, `.lattice/learnings/**`, `.lattice/config.yaml`, `AGENTS.md`/`CLAUDE.md`, and the diffed source. (Learnings are repo-wide rules, not this change's intent — read them, never write them.)
 >
 > **Do not infer author intent** from commit messages, docstrings, TODOs, or comments. Judge the code on observable behavior alone. "The comment says it's fine" is not evidence.
 >
@@ -701,6 +747,8 @@ Then append the pass-specific task:
 The critics answer *is this correct*. Pass N answers *what is this*, for a reader who owns the product and does not read code. Append this to the isolation contract, replacing its return-format block:
 
 > Your job is not to find defects — three other passes are doing that, and a defect you notice is theirs to report, not yours. Your job is to say what this change **does**, and above all to **draw the flow it changes as a diagram**, in this repo's own domain language, for a reader who owns the product and does not read code.
+>
+> When `scope.txt` has `DELTA=since-last-review`, "this change" means only the diff: what changed since the last review. Describe that, not the whole PR.
 >
 > Read `{{RUN_DIR}}/packet/ddd.md` first — it is this repo's domain vocabulary, and `VOCAB` there tells you whether it is the project's real ubiquitous language or generic tactical terms. Then read `diff.patch`. Open a source file from `{{SOURCE_ROOT}}` only to learn what a thing *is* when the diff does not make that clear.
 >
@@ -840,7 +888,7 @@ Its contract, in place of the isolation contract:
 > - Source files under `{{SOURCE_ROOT}}` — open the flagged file/line to judge whether the issue still exists.
 >
 > **A finding counts as HANDLED — do not report it — when any of these is true:**
-> - **Fixed in the diff.** The flagged code path was changed so the issue no longer applies. Verify against `diff.patch` and the current source, not against the tool's claim.
+> - **Fixed in the diff.** The flagged code path was changed so the issue no longer applies. Verify against `diff.patch` and the current source, not against the tool's claim. When `scope.txt` has `DELTA=since-last-review`, the diff holds only the latest changes: a fix made before the last review is not in it, so judge by the current source.
 > - **Suppressed in code.** An inline ignore directive for that tool sits on or immediately above the flagged line (e.g. a `wiz-ignore` / `nosemgrep` / `# noqa` / `sonar` suppression comment, or the tool's own documented suppression syntax). A suppression with a reason is stronger than a bare one; either counts, but note a bare suppression on a HIGH/CRITICAL finding.
 > - **Dismissed in the thread.** A human (not the bot) replied under the finding accepting or dismissing it, or the tool itself marked it resolved/won't-fix. Quote the dismissing reply's author and gist in NOTES.
 >
@@ -866,6 +914,34 @@ Two things about this pass:
 
 - **It reports only the gaps.** A tidy PR where every Wiz finding was fixed or explicitly accepted returns `UNADDRESSED: 0` and no finding lines — that is the success case, and the counts still print in Step 8 so the reader sees the tool ran clean. Padding it with handled findings would bury the ones that matter.
 - **Its unaddressed findings hit the security floor in triage.** An `UNADDRESSED` line cannot be waved into NOISE or MISREAD without naming the specific handling Pass W missed (a suppression it did not see, a reply it did not read). Absent that, it is a BLOCKER — see Step 7.
+
+**Pass F — fix check** (re-review only; `DELTA: applied` and `DELTA_PRIOR_BLOCKERS` above 0)
+
+A re-review looks at the delta, so a blocker the author did not touch would never come up again. Pass F closes that gap: it checks each blocker from the last review against the current code. It takes the isolation contract verbatim, with one exception to its forbidden reads, then this task, which replaces the contract's return-format block:
+
+> Your job is to check whether the blockers from the last review of this PR are fixed. Read `{{RUN_DIR}}/delta/prior-blockers.md` — the only file under `{{RUN_DIR}}/delta/` you may read. It lists each earlier blocker with the file, line, problem, and the fix that was asked for. Its line numbers are from the old code.
+>
+> For each blocker, open the file from `{{SOURCE_ROOT}}` and find the code the blocker is about. It may have moved. Decide:
+>
+> - **FIXED** — the problem is gone from the current code. It does not matter whether the fix is the one asked for.
+> - **OPEN** — the problem is still there, or only part of it was fixed, or you cannot find the code and cannot show it was removed.
+>
+> Use `diff.patch` to see what changed, but judge by the current source. Do not look for new problems — other passes do that. Report only the OPEN blockers, at their earlier severity, with the current `file:line`.
+>
+> Write your reasoning for every blocker to `{{RUN_DIR}}/raw/fix-check.md`. Return *only* this block:
+>
+> ```
+> PASS: fix-check
+> STATUS: ok | partial | failed
+> TOTAL: <n>  FIXED: <n>  OPEN: <n>
+> ---
+> <CRITICAL|HIGH|MEDIUM|LOW>|<file>:<line>|prior-blocker-open|<B<n>: the earlier problem, and what is still wrong>|<the fix still needed>
+> ---
+> NOTES: <at most two lines, only if something anomalous happened>
+> FILES_READ: <comma-separated paths you opened>
+> ```
+
+Pass F is isolated like the critics. The earlier blockers are findings from an earlier review, not author intent, so it may read them. It may not read `pr-context/`. Its OPEN lines go to triage under the prior-blocker floor (Step 7).
 
 **Pass C — Codex** (background Bash, launched in the same message, not a subagent) — **only when `CODEX_REQUESTED: 1` and `HAS_CODEX: 1`.** Skip this pass entirely otherwise; there is nothing to launch and no field to fill.
 
@@ -913,7 +989,7 @@ Budget expectations: measured floor is ~30s on an *empty* diff (process start, g
 printf "%s\n" "CODEX_REQUESTED='1'" "CODEX_REASON='risk-pass'" >> "$RUN_DIR/state.env"
 ```
 
-Then audit isolation. Check each `FILES_READ:` line against the forbidden list — **for the isolated passes only (A, B, N, K, R)**. Pass D and Pass E were already audited at the gate (Step 4.8); carry those results into the report. **Pass W is exempt:** reading `pr-context/**` is its assigned job, so a `pr-context/` path in *its* `FILES_READ` is expected, not a leak. Any *other* pass with a `pr-context/` path, on the other hand, is the most serious leak there is (see below).
+Then audit isolation. Check each `FILES_READ:` line against the forbidden list — **for the isolated passes only (A, B, N, K, R, F)**. Pass F may read `delta/prior-blockers.md`; for every other pass a `delta/` path is a leak. Pass D and Pass E were already audited at the gate (Step 4.8); carry those results into the report. **Pass W is exempt:** reading `pr-context/**` is its assigned job, so a `pr-context/` path in *its* `FILES_READ` is expected, not a leak. Any *other* pass with a `pr-context/` path, on the other hand, is the most serious leak there is (see below).
 
 - Clean → proceed.
 - Forbidden path present → note the leak, downgrade that pass's confidence (its *"by design"* concessions become suspect; its bug findings do not). Re-spawn only if the leak is material and the pass is cheap.
@@ -953,7 +1029,7 @@ Record any violation, and treat that pass's findings as still valid but its judg
 
 ### Step 7: Triage
 
-You are back in the producer context with full knowledge of design intent. Work from the compact blocks — **neither Pass N's nor Pass K's is among them**; the narrative carries no findings and the risk pass reports a class, not defects, so both stay out of triage entirely. Pass K's `RISK_LEVEL` feeds the header and the verdict framing, never a bucket. **Pass W's block *is* among them**, tagged `static-analysis` — its `UNADDRESSED` lines are findings and enter triage like any critic's, under the static-analysis floor below. **So is Pass E's**, tagged `eng-review`, whenever the architecture gate ran it. Pass D's is not: it reports decisions, not defects.
+You are back in the producer context with full knowledge of design intent. Work from the compact blocks — **neither Pass N's nor Pass K's is among them**; the narrative carries no findings and the risk pass reports a class, not defects, so both stay out of triage entirely. Pass K's `RISK_LEVEL` feeds the header and the verdict framing, never a bucket. **Pass W's block *is* among them**, tagged `static-analysis` — its `UNADDRESSED` lines are findings and enter triage like any critic's, under the static-analysis floor below. **So is Pass E's**, tagged `eng-review`, whenever the architecture gate ran it. **So is Pass F's**, tagged `fix-check`, on a re-review — its OPEN lines are findings, under the prior-blocker floor below. Pass D's is not: it reports decisions, not defects.
 
 **When `PR_CONTEXT: present`, read the PR context now — this is the producer's privilege the isolated passes were denied.** Read `$RUN_DIR/pr-context/body.md` always, and `$RUN_DIR/pr-context/discussion.md` to check surviving findings against what the PR already settled (skim it rather than reading whole when `DISCUSSION_LINES` is large). Use it two ways, and only these two:
 
@@ -973,6 +1049,7 @@ Three overrides:
 
 - **Security floor**: a `cso` finding at HIGH or CRITICAL cannot go to bucket 3 or 4 without naming the specific compensating control — the code path, config, or middleware that neutralizes it — and where it lives. Absent that, it is a REAL BUG.
 - **Static-analysis floor**: a Pass W `UNADDRESSED` finding is a REAL BUG (bucket 1) unless you can name the specific handling Pass W missed — a suppression directive it did not see, or a human dismissal reply it did not read, cited by location. It may **not** go to bucket 3 or 4 on your own judgment that it "looks fine": the entire point is that the tool flagged it and nobody dispositioned it. This holds regardless of the tool's stated severity — an unaddressed finding is a gate on the verdict, not advice.
+- **Prior-blocker floor** (re-review only): a Pass F OPEN line is a REAL BUG (bucket 1). It was already triaged as a blocker in the last review. It leaves bucket 1 in only three ways, each cited: the specific change, by `file:line` in the current code, that fixed it and Pass F missed; a maintainer's dismissal in the PR discussion (`pr-context/discussion.md`), quoted; or proof that the earlier finding was a misread, which requires that you opened the file. A blocker that leaves this way is `released` — say which of the three in `report.md` and count it in the log. It may not leave on your own judgment that it "looks fine": the last review already decided it matters.
 - **Convergence**: a finding raised by two or more passes cannot go to bucket 3 — but weight the convergence by how independent the sources actually are, because not all agreement is evidence:
 
   | Sources agreeing | Independence | Weight |
@@ -1023,6 +1100,7 @@ Rules for the narrative block:
 - **The summary is one paragraph — the `HEADLINE`, verbatim.** Do not append the `NEW OR CHANGED RULES`, `BOUNDARIES AND CONTRACTS`, or `NOT IN THIS CHANGE` sections to chat; they live in `report.md`. Print the headline as Pass N wrote it — do not rewrite it, "improve" it, or merge it with what you know about the change. You have the producer context; Pass N does not, and that is the point.
 - **When the narrative and the PR title disagree, keep the one ⚠ line.** `⚠ the PR title says <x>; the code says <y>.` This is the highest-value line this mode emits and it survives the trim. State both and let the reader decide; do not editorialize.
 - On a Pass N isolation leak (Step 6), prefix the block `[intent-contaminated]` or omit it entirely.
+- **On a re-review** (`DELTA: applied`) the heading is `WHAT CHANGED SINCE THE LAST REVIEW — PR #<n>: <title>`, and the `⚠` title line is never printed: the title describes the whole PR, and the narrative describes only the delta, so they are expected to differ.
 
 Then the review block:
 
@@ -1031,6 +1109,7 @@ FRESH REVIEW — <COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT>
                  (pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES)
 <branch, or PR #<n> @ <short sha>> · <N> files, +<a>/−<b> · risk: <low|med|high> · <elapsed>
 architecture: <approved (<n> decisions) | no design decisions | skipped (--arch-approved)>   (always)
+re-review: changes since <short PRIOR_HEAD> (last verdict <PRIOR_VERDICT>) · earlier blockers: <total> — <fixed> fixed, <open> still open   (only when DELTA: applied)
 static analysis (<tool>): <total> raised — <fixed> fixed, <suppressed> suppressed, <dismissed> dismissed, <unaddressed> unaddressed   (only when Pass W ran)
 ⚠ reduced coverage: <what was missing>                               (only when a pass failed / was unavailable)
 
@@ -1060,11 +1139,12 @@ Rules:
 - For a stack unit the context line names every PR in it and the unit: `PRs #42–#43 @ <short sha> · stack unit 1 of 3`. **The last line of the whole chat output is the stack report** from the handoff, filled in with the verdict and the blocker count: `STACK REPORT — <stack id> · unit 1/3 · PRs #42, #43 · REQUEST-CHANGES · blockers 2`. It is for the user to paste back to the orchestrator, so print it exactly in that shape. On a pending architecture gate, the verdict there is `ARCH-PENDING`.
 - In pr-remote mode the context line names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open, so nobody acts on `REQUEST-CHANGES` for something that already landed.
 - **The `architecture` line always prints.** It tells the reader whether the structure was agreed before the findings below were produced. The diagram and trade-offs were already shown at the gate (Step 4.8); do not print them again here.
+- **The `re-review` line prints only when `DELTA: applied`.** It tells the reader that the findings below cover only the delta. The blocker counts come from Pass F; with no earlier blockers, print `earlier blockers: 0`. Its `<open>` count is the number of `fix-check` lines still in BLOCKERS after triage; a released one counts as fixed. When a delta was asked for but a full review ran (`DELTA: full`), do not print it — Step 1.6 already said why.
 - **The `static analysis` line prints only when Pass W ran** (`SA_PRESENT: 1`). It gives the reader the whole feature-1 answer in one line: how many the tool raised and how they broke down. Its `<unaddressed>` count equals the number of Pass W blockers below. Omit the line entirely when no analyzer findings were on the PR.
-- **The `⚠ reduced coverage` line prints only when the run actually lost a lens** — a critic pass failed, `HAS_GSTACK: 0`, a requested or required Codex could not run, or (pr-remote) Pass R could not run. On a high-risk run without Codex, say it plainly: `⚠ reduced coverage: Codex is required for high-risk changes and did not run (<reason>) — fix with codex login, then re-run`. Name what is missing in one line (e.g. `cso did not run — no gstack install`; `Pass R skipped — structural specialists and red-team not covered, and no /ship of yours reviews this PR`). On a clean full run, omit it. This is the one safety signal kept in chat; the exhaustive "what this skill structurally defers to /ship" note lives in `report.md`.
+- **The `⚠ reduced coverage` line prints only when the run actually lost a lens** — a critic pass failed, `HAS_GSTACK: 0`, a requested or required Codex could not run, (pr-remote) Pass R could not run, or (re-review) Pass F failed — `earlier blockers not checked`. On a high-risk run without Codex, say it plainly: `⚠ reduced coverage: Codex is required for high-risk changes and did not run (<reason>) — fix with codex login, then re-run`. Name what is missing in one line (e.g. `cso did not run — no gstack install`; `Pass R skipped — structural specialists and red-team not covered, and no /ship of yours reviews this PR`). On a clean full run, omit it. This is the one safety signal kept in chat; the exhaustive "what this skill structurally defers to /ship" note lives in `report.md`.
 - **Every finding from every pass appears here**, in one of the four buckets. Deduplicated, with its sources tagged, but never dropped and never deferred to the report file. A bucket with zero findings collapses to a single `BY DESIGN (0)` line.
 - Blockers get the full two-line treatment. The other three buckets get one line each. In pr-remote, blockers are phrased as `→ ask:` (comments, not fixes), matching the verdict vocabulary.
-- `[<sources>]` is the merged source list (`lattice`, `cso`, `review`, `codex`, `static-analysis`, `eng-review`) — this is how the user sees which passes converged. `review` appears only on pr-remote runs; `static-analysis` only when Pass W ran; `eng-review` only when the architecture gate ran Pass E.
+- `[<sources>]` is the merged source list (`lattice`, `cso`, `review`, `codex`, `static-analysis`, `eng-review`, `fix-check`) — this is how the user sees which passes converged. `review` appears only on pr-remote runs; `static-analysis` only when Pass W ran; `eng-review` only when the architecture gate ran Pass E; `fix-check` only on a re-review.
 - The `log:` line is a footer, not a substitute for anything above it.
 
 **When the architecture gate did not clear**, the review block changes:
@@ -1147,16 +1227,26 @@ This must run even on abort or error. If the user interrupts mid-review, restori
 
 ### Step 10: Persist the run log
 
+**In pr-remote, record the review first,** so a later re-review can start from it. Do this only when the implementation review ran (`ARCH_GATE` is not `rejected` or `pending`). Write `$RUN_DIR/blockers.json`: a JSON array of this run's bucket-1 findings, `[]` when there are none. Each item is `{"severity","file","line","category","problem","fix","sources"}`, and the first six keys are required. **Copy `severity`, `category`, `problem`, and `fix` word for word from the pass line that raised the finding.** Pass F reads this text in the next re-review. You chose which findings are blockers with the PR discussion in hand, and a rewrite in your words would carry that discussion into an isolated pass. For a merged finding, take the line of the first source. On a re-review it holds the still-open earlier blockers (Pass F's lines) and the new ones, so the next re-review checks both. The third argument is the run's coverage: `reduced` when the Step 8 `⚠ reduced coverage` line printed, otherwise `full`. A reduced review is recorded, but the next `--delta` runs as a full review. Then:
+
+```bash
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-review-record.sh" "$RUN_DIR" "$VERDICT" "<full|reduced>"
+```
+
+`RECORD: written` → done. `RECORD: failed` → say `This review was not recorded (<REASON>); a later re-review of PR #<n> will run as a full review.` and continue. `REASON` is `bad_blockers` (fix `blockers.json` and run it again), `bad_verdict`, `bad_coverage`, `not_pr_remote`, `ref_update_failed`, or `record_write_failed` (the refs moved but the JSON did not; the next re-review sees `record_mismatch` and runs in full).
+
 Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where the **long form** goes: the Step 8 chat output, plus everything trimmed off it (the full narrative sections `NEW OR CHANGED RULES` / `BOUNDARIES AND CONTRACTS` / `NOT IN THIS CHANGE`, the Pass K risk rationale and factor line, the full pass inventory line, the UI-preview line, the structural "not covered here — /ship owns …" note, the PR-context and static-analysis summary, the scope, and the isolation-audit result). Nothing that used to be in chat is lost; it just lives here now. Then write `$RUN_DIR/run.json`:
 
 ```json
-{"skill":"fresh-review","schema":10,"run_id":"<RUN_ID>",
+{"skill":"fresh-review","schema":11,"run_id":"<RUN_ID>",
  "ts_start":"<TS_START>","ts_end":"<now>","duration_s":0,
  "repo":"<repo>","branch":"<BRANCH>","base":"<BASE>",
  "mode":"<review|pr>","codex_requested":false,"codex_reason":"<none|asked|risk|risk-pass>",
  "architecture":{"gate":"<not_needed|approved|rejected|pending|skipped|failed>","decisions":0,"diagram":false},
  "pr":{"number":0,"url":"","state":"","head":"","drift":false},
  "stack":{"id":"<STACK_ID>","unit":1,"units":1,"prs":[0]},
+ "delta":{"requested":true,"applied":true,"reason":"<DELTA_REASON>","kind":"<fast_forward|rebased>",
+          "prior_run":"<DELTA_PRIOR_RUN>","prior_head":"<DELTA_PRIOR_HEAD>","prior_blockers":0,"fixed":0,"open":0,"released":0},
  "pr_context":{"present":false,"comments":0,"reviews":0,"threads":0,"discussion_lines":0},
  "scope":"<REVIEW_SCOPE>","diff_base":"<DIFF_BASE>","checkpoint":"<CHECKPOINT_SHA>",
  "risk":"<RISK>","risk_level":"<low|med|high>",
@@ -1170,6 +1260,7 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
    {"name":"cso","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"review","status":"ok","duration_s":0,"findings":0},
    {"name":"static-analysis","status":"ok","duration_s":0,"tool":"","unaddressed":0},
+   {"name":"fix-check","status":"ok","duration_s":0,"fixed":0,"open":0,"isolation":"clean"},
    {"name":"codex","status":"ok","duration_s":0,"findings":0,"changed_verdict":false},
    {"name":"risk","status":"ok","duration_s":0,"risk_level":"<low|med|high>","isolation":"clean"},
    {"name":"narrative","status":"ok","duration_s":0,"findings":0,"isolation":"clean",
@@ -1182,6 +1273,7 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
 - **Set `architecture` from Step 4.8.** `gate` is `skipped` under `--arch-approved`, `failed` when Pass D failed, `not_needed` when Pass D found no decisions, and otherwise the `ARCH_GATE` answer. `decisions` is Pass D's count; `diagram` is whether one was shown. Omit the `architecture` pass when the gate was skipped, and the `eng-review` pass whenever Pass E did not launch (no decisions, gate skipped, or `HAS_GSTACK: 0`). When the gate did not clear, the implementation passes never launched — omit them too, and set `verdict` to `ARCH-PENDING` for a pending gate.
 - Set `codex_requested` from the final `CODEX_REQUESTED` in `state.env` (after Step 4 and Step 6 may have forced it), and `codex_reason` from `CODEX_REASON`. It is what tells cross-run analysis apart: a `codex` pass absent because it was never asked for versus one dropped because it failed.
 - **Omit the `codex` pass from `passes[]` when `codex_requested` is `false`** — a pass that never launched is not a pass that failed, and `codex_requested` already records the choice. When it was requested but failed or was unavailable, keep the entry with `"status":"failed"` so the failure stays visible.
+- **Add `delta` only when `--delta` was requested.** `applied` is `DELTA: applied`; `reason` is `DELTA_REASON` (empty when applied). `fixed` and `open` are Pass F's counts after triage; `released` is how many OPEN lines left bucket 1 under the prior-blocker floor (they count as fixed too). Omit `kind`, `prior_run`, `prior_head`, and the counts when the delta was not applied. Omit the `fix-check` pass when Pass F did not launch; keep it with `"status":"failed"` when it launched and failed. `diff` then counts the delta, not the whole PR.
 - **Add `stack` only for a stack unit** — when the handoff gave a stack id. Take `id`, `unit`, and `units` from the handoff and `prs` from `STACK_PRS`. The orchestrator's own entry (`mode: "stack"`) is written by `fr-stack.sh` and carries the whole plan instead.
 - Omit `pr` outside pr-remote mode, and both the `narrative` and `risk` passes outside `pr` mode — an absent pass and a failed one must stay distinguishable. Likewise omit `risk_level` (top-level) and the `ui_preview` object outside `pr` mode; they are pr-mode artifacts. `risk` (the mechanical class) is always present.
 - **Keep the mechanical `risk` and Pass K's `risk_level` distinct.** `risk` is `normal`/`high` from `fr-packet.sh`'s pattern count and gates `/cso` depth; `risk_level` is Pass K's `low`/`med`/`high` judgment and is what the header shows. In `review` mode `risk_level` is absent and only `risk` exists. When the `risk` pass failed, keep its entry with `"status":"failed"` and omit `risk_level`.
@@ -1209,7 +1301,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - *Is the narrative telling anyone anything?* `narrative.title_mismatch` over many pr-remote runs is the direct measure. If it is never true, the mode is producing pleasant restatements and its isolation is not buying what it costs; if it is often true, PR descriptions in this repo are not to be trusted, which is worth knowing on its own. `narrative.diagram` alongside it says whether the diagram-first mode is actually drawing diagrams or mostly returning `none`.
 - *Does the risk class track reality?* `risk_level` against the triage counts over many runs answers whether the pass is calibrated: `high`-risk runs should not be the ones with zero real bugs *and* zero caution, and a repo where every change comes back `low` has a pass that has stopped discriminating.
 
-**Schema history.** `schema:10` adds stack mode: an orchestrator entry with `mode: "stack"`, `verdict: "HANDOFF"`, no passes, and a `stack` object holding the plan; and an optional `stack` object on each unit's review entry linking it back by `id`. Reading a `schema:9` entry, treat `stack` as absent — stack mode did not exist. `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
+**Schema history.** `schema:11` adds re-review: an optional `delta` object (present only when `--delta` was asked for) and an optional `fix-check` pass (Pass F). On a `schema:11` entry with `delta.applied:true`, `diff`, `triage`, and the findings cover only the changes since `delta.prior_head`. Reading a `schema:10` entry, treat `delta` as absent — every review covered the whole PR. `schema:10` adds stack mode: an orchestrator entry with `mode: "stack"`, `verdict: "HANDOFF"`, no passes, and a `stack` object holding the plan; and an optional `stack` object on each unit's review entry linking it back by `id`. Reading a `schema:9` entry, treat `stack` as absent — stack mode did not exist. `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
 
 ## Failure modes and recovery
 
@@ -1257,6 +1349,13 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **The orchestrator session was closed** → the status file survives in the stack's run directory. In a new session, run `fr-stack-status.sh` on that directory to see where the stack stands and keep reporting.
 - **A stack of one PR** (`NEXT: review_here`) → no plan, no handoff. Re-run Step 1 with `REVIEW_ARGS` and review the PR in this session.
 - **`since_pr_not_below`** → the handoff is stale (the stack was restacked) or hand-typed wrong. Re-run the stack orchestrator to get fresh handoffs.
+- **Re-review with no earlier review recorded** (`DELTA: full`, `no_prior_review`) → not an error. The first review ran before re-review existed, in another clone, or did not finish. Say so and run the full review; it becomes the record for the next re-review.
+- **The old PR no longer applies to the new base** (`replay_conflict`) → the author's changes cannot be separated from the base's. Say so and run the full review. Do not hand-build a delta.
+- **Nothing new since the last review** (`DELTA: none`) → say so with the last verdict, remove the PR worktree (Step 9), and stop.
+- **A record the delta cannot trust** (`record_invalid`, `record_mismatch`) → run the full review. It writes a fresh record, which repairs the state for the next re-review.
+- **The last review lost a lens** (`prior_reduced_coverage`) → run the full review, so the code the reduced run saw gets every lens once.
+- **Pass F fails** → continue. Name it in the reduced-coverage line (`earlier blockers not checked`), keep the `fix-check` pass with `"status":"failed"`, and carry the earlier blockers into `blockers.json` unchanged, so the next re-review checks them again.
+- **The review record is not written** (`RECORD: failed`) → continue, and say that a later re-review will run as a full review.
 - **The session ends while the gate waits** → the checkpoint is still in place. On the next turn run `fr-restore.sh "$RUN_DIR"` first, as for any interrupted run, then ask whether to re-run with `--arch-approved`.
 
 ## What this skill does NOT do
@@ -1270,7 +1369,8 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Stop `/ship` from reviewing again.** Ship's pre-landing review is unconditional and reviews the *final* diff — post-fix, post-CHANGELOG, post-base-merge — a different artifact from what these passes saw. `references/ship-dispatch-gate.md` trims the parts that are genuinely duplicated; the rest is supposed to run.
 - **Analyze runs across sessions.** The log is written to be analyzable; reading it is a separate tool's job.
 - **Post anything to GitHub.** The narrative and the risk class are printed to chat and written to disk, never sent. No `gh pr comment`, no `gh pr review`, no `gh pr edit --body`, no uploading a screenshot to the PR, not even in pr-remote mode where a PR is plainly sitting there — publishing a review under the user's name is theirs to decide, and an unattended run inside `/loop` must not be able to do it. If they want it posted, they will say so, and that is a separate action taken with the text in front of them. Reading the PR's description and discussion (Step 4.7) is read-only and one-directional: nothing is ever written back.
-- **Feed PR context to the review passes.** The description, discussion, and bot findings gathered in Step 4.7 reach only the producer (triage) and Pass W. The critics and the narrator stay blind to them by design — that is the whole reason the gather writes to a producer-only directory the isolated passes are forbidden to read. If you find yourself handing `pr-context/` to Pass A, B, N, K, or R, you have broken the skill's central invariant.
+- **Feed PR context to the review passes.** The description, discussion, and bot findings gathered in Step 4.7 reach only the producer (triage) and Pass W. The critics and the narrator stay blind to them by design — that is the whole reason the gather writes to a producer-only directory the isolated passes are forbidden to read. If you find yourself handing `pr-context/` to Pass A, B, N, K, R, or F, you have broken the skill's central invariant.
+- **Re-review your own branch as a delta.** `--delta` works for pr-remote and stack units only. On your own branch, the checkpoint is reset after each run, and a normal review of the branch is the re-review.
 - **Modify the PR under review.** pr-remote mode is read-only on someone else's branch. Findings are comments; the worktree is disposable and gets deleted.
 - **Review a PR from another repo.** `foreign_repo` stops it. There is no local tree to materialize the head into, and a patch without its source tree produces reviewers reading the wrong file contents. Clone that repo and run there.
 - **Persist a `/plan-eng-review` result.** Pass E skips its Review Log on purpose. Ship's Eng Review row tracks the *final* diff, and a pre-commit architecture review is not that.
@@ -1310,5 +1410,11 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 **"review the stack for PR 43"** → `--stack "43"`. Step S finds PRs #41 → #45. #42 is 5 lines, so it joins #41 in unit 1 (`--pr 42 --since-pr 41`). #43 touches `auth.py`, so it is high risk and stays alone. #44 starts a new unit above it, and #45 changes different files and is not small, so it stays alone too. Chat gets the plan table and four handoffs to copy. The user opens four new sessions and pastes one handoff into each. No code is reviewed in this session. As each review ends, the user pastes its `STACK REPORT` line back; the orchestrator records it and shows the table — `Stack: REQUEST-CHANGES (2/4 reported)` after unit 2 comes back with blockers, and `Stack: APPROVE-WITH-COMMENTS (4/4 reported)` once the fixes are re-reviewed.
 
 **"review the stack for PR 46"** where #46 has no PR below or above it → `NEXT: review_here`. No plan and no handoff: this session re-runs Step 1 with `--pr 46` and reviews it as usual.
+
+**"re-review PR 42"** after the author pushed two fix commits → `--pr 42 --delta`. Step 1.6 finds the last review of PR #42 (`REQUEST-CHANGES`, 2 blockers) and builds the delta: only the two fix commits' changes. Pass D checks the delta for architecture decisions; the critics, Pass N, Pass K, and Pass R review the delta; Pass F checks the 2 earlier blockers against the current code — one fixed, one still open. Chat gets `WHAT CHANGED SINCE THE LAST REVIEW`, then the verdict, `re-review: changes since a1b2c3d (last verdict REQUEST-CHANGES) · earlier blockers: 2 — 1 fixed, 1 still open`, and the open blocker tagged `[fix-check]`, with any new findings. The record moves to the new head.
+
+**"re-review PR 42"** after the author rebased onto a newer `main` and fixed one line → the same run. `DELTA_KIND: rebased`: the delta holds the one-line fix, not `main`'s changes. Had the rebase changed nothing of the PR's own, Step 1.6 would say `Nothing to re-review` and stop.
+
+**"re-review unit 2"** in the orchestrator session → Step S prints `unit-2-rereview.md`: `/fresh-review:review --pr 43 --delta` plus the handoff. The user pastes it in a new session; its `STACK REPORT` line replaces unit 2's old verdict.
 
 **The PR title says "add refund support"; the narrative says a fee is recorded but never reversed** → the `⚠` mismatch line in Step 8, `title_mismatch: true` in the run log. This is the outcome the whole isolation contract exists to make possible.

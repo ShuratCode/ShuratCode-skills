@@ -120,6 +120,9 @@ H1="$RD/handoff/unit-1.md"
 [ "$(head -1 "$RD/handoff/unit-2.md")" = "/fresh-review:review --pr 43" ] \
   && ok "a single-PR unit hands off --pr <n>" \
   || bad "unit 2 invocation" "--pr 43" "$(head -1 "$RD/handoff/unit-2.md")"
+[ "$(head -1 "$RD/handoff/unit-1-rereview.md")" = "/fresh-review:review --pr 42 --since-pr 41 --delta" ] \
+  && ok "a unit's re-review handoff adds --delta" \
+  || bad "unit 1 re-review invocation" "--pr 42 --since-pr 41 --delta" "$(head -1 "$RD/handoff/unit-1-rereview.md")"
 grep -q "SECRET TITLE" "$RD"/handoff/*.md \
   && bad "handoffs carry no PR titles" "no title" "title found" \
   || ok "handoffs carry no PR titles"
@@ -198,6 +201,7 @@ resolve unit 42 41
 want "$TMP/unit.out" PR resolved "--pr 42 --since-pr 41"
 want "$TMP/unit.out" STACK_PRS "41 42" "--pr 42 --since-pr 41"
 want "$TMP/unit.out" UNIT_BASE main "--pr 42 --since-pr 41"
+want "$TMP/unit.out" REVIEW_KEY pr-42-since-41 "a unit has its own review key"
 want "$TMP/unit.out" DIFF_BASE "$MAIN_SHA" "the unit diff starts at the bottom PR's base"
 
 resolve miss 43 99

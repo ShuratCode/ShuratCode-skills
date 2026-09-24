@@ -259,9 +259,11 @@ def pr_list(numbers):
     return ", ".join(f"#{n}" for n in numbers)
 
 
-def handoff_text(unit, k, units):
+def handoff_text(unit, k, units, rereview=False):
     top, bottom = unit["prs"][-1], unit["prs"][0]
     args = f"--pr {top}" if len(unit["prs"]) == 1 else f"--pr {top} --since-pr {bottom}"
+    if rereview:
+        args += " --delta"
     if env.get("CODEX_REQUESTED") == "1":
         args += " --codex"
     if len(unit["prs"]) == 1:
@@ -279,6 +281,9 @@ def handoff_text(unit, k, units):
         scope,
         f"- Why: {'; '.join(unit['why'])}.",
     ]
+    if rereview:
+        lines.append("- Re-review: this unit was reviewed before. Review only what changed since that "
+                     "review, and check that each earlier blocker is fixed.")
     if others:
         lines.append(f"- Other units run in their own sessions: {', '.join(others)}. "
                      "Do not review their changes here.")
@@ -323,7 +328,7 @@ def write_plan(chain, units, fork_at):
 def write_run_json(chain, units, fork_at):
     now = int(time.time())
     record = {
-        "skill": "fresh-review", "schema": 10, "run_id": run_id,
+        "skill": "fresh-review", "schema": 11, "run_id": run_id,
         "ts_start": env.get("TS_START", ""), "ts_end": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_s": now - int(env.get("T0", now)),
         "repo": os.path.basename(env["REPO_ROOT"]), "branch": env.get("BRANCH", ""),
@@ -369,6 +374,8 @@ def main():
     for k, unit in enumerate(units, 1):
         with open(os.path.join(handoff_dir, f"unit-{k}.md"), "w") as fh:
             fh.write(handoff_text(unit, k, units))
+        with open(os.path.join(handoff_dir, f"unit-{k}-rereview.md"), "w") as fh:
+            fh.write(handoff_text(unit, k, units, rereview=True))
     write_run_json(chain, units, fork_at)
     cleanup()
 

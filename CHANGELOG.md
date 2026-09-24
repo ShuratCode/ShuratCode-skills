@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.21.0 — 2026-09-24
+
+### `fresh-review` 0.12.0 → 0.13.0: re-review only the delta
+
+After a first review and the author's fixes, a re-review now looks only at what changed since the
+last review. It works for PR reviews (`--pr`) and stack units.
+
+- **New flag, `--delta`.** Triggered by "re-review PR 42", "review PR 42 again", or "review the fixes
+  on PR 42". It needs `--pr`.
+- **Every finished PR review is recorded.** A new script, `fr-review-record.sh`, writes the reviewed
+  PR head, its merge-base, the verdict, and the open blockers to `<git-common-dir>/fresh-review/reviews/`.
+  Refs under `refs/fresh-review/reviewed/` keep both commits alive after a force-push. A combined
+  stack unit has its own record (`pr-<top>-since-<bottom>`).
+- **The delta holds the author's changes only.** A new script, `fr-delta.sh`, replays the PR as it was
+  at the last review onto the PR's current base, and diffs that against the new head. A rebase or a
+  merge of `main` does not add `main`'s changes to the delta. Codex and `/review` see the same delta.
+- **Earlier blockers are checked.** A new isolated pass, Pass F (fix check), reads the last review's
+  blockers and the current code, and reports the ones still open. An open one stays a blocker.
+- **Safe fallbacks.** A full review, with the reason, when there is no earlier review, the record is
+  corrupt or its refs disagree, the earlier review lost a lens (reduced coverage), the old PR no longer
+  applies to the new base, or a rebase changed nothing but earlier blockers are open. The run stops and
+  says so when nothing changed: the same head and base, a push that cancels out, or a rebase with no
+  open blockers.
+- **Risk carries over.** A re-review of a high-risk PR stays high risk, so Codex and
+  `/cso --comprehensive` still run on a small fix.
+- **The record is written in one transaction** (both refs together) and validated, and each blocker
+  keeps the finding's words exactly as the pass wrote them.
+- **An earlier blocker stays a blocker** unless a fix is cited, a maintainer dismissed it in the PR
+  discussion, or it is shown to be a misread.
+- **Stack mode.** The orchestrator writes a re-review handoff per unit (`unit-<k>-rereview.md`, the
+  handoff plus `--delta`) and prints it when you ask to re-review a unit.
+
+Run-log schema bumped to `schema:11` (an optional `delta` object and an optional `fix-check` pass).
+New test `tests/test-delta.sh` (fast-forward fixes, rebase with a fix, rebase only, conflict, no new
+commits, record handling); `tests/test-stack.sh` covers the re-review handoff and the unit key.
+
 ## 0.20.0 — 2026-09-24
 
 ### `fresh-review` 0.11.0 → 0.12.0: stack mode — an orchestrator for PR stacks

@@ -21,7 +21,7 @@
 #   === FRESH-REVIEW PR RESOLVE ===
 #   PR: resolved | unresolved
 #   REASON: <slug>                   (only when unresolved)
-#   PR_NUMBER / PR_URL / PR_STATE / PR_FORK / PR_HEAD / PR_BASE / UNIT_BASE / STACK_PRS / HEAD_DRIFT
+#   PR_NUMBER / PR_URL / PR_STATE / PR_FORK / PR_HEAD / PR_BASE / UNIT_BASE / STACK_PRS / REVIEW_KEY / HEAD_DRIFT
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_BASE / DIFF_CMD
 #   === END ===
 #
@@ -164,6 +164,8 @@ fi
 
 REVIEW_SCOPE="pr"
 DIFF_CMD="git diff $DIFF_BASE $PR_HEAD"
+REVIEW_KEY="pr-$PR_NUMBER"
+[ -n "$SINCE_PR" ] && [ "$SINCE_PR" != "$PR_NUMBER" ] && REVIEW_KEY="pr-$PR_NUMBER-since-$SINCE_PR"
 
 # CHECKPOINT is set here because fr-checkpoint.sh does not run in this mode, and
 # three later scripts branch on it. `pr_remote` is its own value rather than a
@@ -181,6 +183,8 @@ kv CHECKPOINT_SHA "$PR_HEAD"
 kv REVIEW_SCOPE "$REVIEW_SCOPE"
 kv DIFF_CMD "$DIFF_CMD"
 kv DIFF_BASE "$DIFF_BASE"
+kv PR_MERGE_BASE "$DIFF_BASE"
+kv REVIEW_KEY "$REVIEW_KEY"
 kv SOURCE_ROOT "$PR_WT"
 kv PR_WT "$PR_WT"
 kv PR_LOCAL_REF "$PR_LOCAL_REF"
@@ -205,6 +209,7 @@ printf '%s\n' "=== FRESH-REVIEW PR RESOLVE ===" \
   "PR_BASE: $PR_BASE_NAME" \
   "UNIT_BASE: $UNIT_BASE_NAME" \
   "STACK_PRS: $STACK_PRS" \
+  "REVIEW_KEY: $REVIEW_KEY" \
   "HEAD_DRIFT: $HEAD_DRIFT" \
   "SOURCE_ROOT: $PR_WT" \
   "REVIEW_SCOPE: $REVIEW_SCOPE" \
