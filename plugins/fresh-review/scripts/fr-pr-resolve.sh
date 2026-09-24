@@ -21,7 +21,7 @@
 #   === FRESH-REVIEW PR RESOLVE ===
 #   PR: resolved | unresolved
 #   REASON: <slug>                   (only when unresolved)
-#   PR_NUMBER / PR_URL / PR_STATE / PR_FORK / PR_HEAD / PR_BASE / HEAD_DRIFT
+#   PR_NUMBER / PR_URL / PR_STATE / PR_FORK / PR_HEAD / PR_BASE / UNIT_BASE / STACK_PRS / HEAD_DRIFT
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_BASE / DIFF_CMD
 #   === END ===
 #
@@ -99,6 +99,26 @@ PR_BASE_NAME=$(read_field baseRefName)
 
 [ -n "$PR_NUMBER" ] && [ -n "$PR_BASE_NAME" ] || unresolved "gh_pr_view_incomplete"
 
+STACK_PRS="$PR_NUMBER"
+UNIT_BASE_NAME="$PR_BASE_NAME"
+SINCE_PR="${SINCE_PR:-}"
+if [ -n "$SINCE_PR" ] && [ "$SINCE_PR" != "$PR_NUMBER" ]; then
+  FOUND=0
+  for _ in $(seq 1 30); do
+    gh pr view "$UNIT_BASE_NAME" --json number,baseRefName \
+      > "$RUN_DIR/raw/pr-stack-link.json" 2>>"$RUN_DIR/raw/pr-view.err" || break
+    LINK_NUMBER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("number") or "")' \
+      "$RUN_DIR/raw/pr-stack-link.json" 2>/dev/null)
+    LINK_BASE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("baseRefName") or "")' \
+      "$RUN_DIR/raw/pr-stack-link.json" 2>/dev/null)
+    [ -n "$LINK_NUMBER" ] && [ -n "$LINK_BASE" ] || break
+    STACK_PRS="$LINK_NUMBER $STACK_PRS"
+    UNIT_BASE_NAME="$LINK_BASE"
+    [ "$LINK_NUMBER" = "$SINCE_PR" ] && { FOUND=1; break; }
+  done
+  [ "$FOUND" = 1 ] || unresolved "since_pr_not_below"
+fi
+
 PR_LOCAL_REF="refs/fresh-review/pr-$PR_NUMBER"
 if ! git fetch --quiet origin "pull/$PR_NUMBER/head:$PR_LOCAL_REF" --force \
       2>"$RUN_DIR/raw/pr-fetch.err"; then
@@ -111,8 +131,8 @@ PR_HEAD=$(git rev-parse "$PR_LOCAL_REF" 2>/dev/null) || unresolved "pr_head_miss
 HEAD_DRIFT=no
 [ -n "$PR_HEAD_OID" ] && [ "$PR_HEAD_OID" != "$PR_HEAD" ] && HEAD_DRIFT=yes
 
-git fetch --quiet origin "$PR_BASE_NAME" 2>/dev/null || true
-DIFF_BASE=$(git merge-base "origin/$PR_BASE_NAME" "$PR_HEAD" 2>/dev/null || echo "")
+git fetch --quiet origin "$UNIT_BASE_NAME" 2>/dev/null || true
+DIFF_BASE=$(git merge-base "origin/$UNIT_BASE_NAME" "$PR_HEAD" 2>/dev/null || echo "")
 [ -n "$DIFF_BASE" ] || unresolved "no_merge_base"
 
 # In-repo only when preflight already established that path is gitignored —
@@ -167,6 +187,8 @@ kv PR_LOCAL_REF "$PR_LOCAL_REF"
 kv PR_NUMBER "$PR_NUMBER"
 kv PR_HEAD "$PR_HEAD"
 kv PR_BASE_NAME "$PR_BASE_NAME"
+kv UNIT_BASE_NAME "$UNIT_BASE_NAME"
+kv STACK_PRS "$STACK_PRS"
 kv PR_FORK "$PR_FORK"
 kv HEAD_DRIFT "$HEAD_DRIFT"
 kv PR_RESOLVED "1"
@@ -181,6 +203,8 @@ printf '%s\n' "=== FRESH-REVIEW PR RESOLVE ===" \
   "PR_FORK: $PR_FORK" \
   "PR_HEAD: $PR_HEAD" \
   "PR_BASE: $PR_BASE_NAME" \
+  "UNIT_BASE: $UNIT_BASE_NAME" \
+  "STACK_PRS: $STACK_PRS" \
   "HEAD_DRIFT: $HEAD_DRIFT" \
   "SOURCE_ROOT: $PR_WT" \
   "REVIEW_SCOPE: $REVIEW_SCOPE" \

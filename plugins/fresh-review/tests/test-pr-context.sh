@@ -79,6 +79,7 @@ run_ctx() { # run-name  [GH_FAIL]
     echo "RUN_DIR='$run'"
     echo "PR_NUMBER='${PR_NUMBER:-}'"
     echo "PR_HEAD='${PR_HEAD:-}'"
+    echo "STACK_PRS='${STACK_PRS:-}'"
   } > "$run/state.env"
   local bin; bin="$(make_gh "$run")"
   PATH="$bin:$PATH" \
@@ -167,6 +168,20 @@ printf '{"check_runs":[]}\n' > "$FX3/check-runs.json"
 OUT="$(run_ctx case3 1)"
 want "$OUT" PR_CONTEXT none "no PR for branch"
 want "$OUT" SA_PRESENT no "no PR — no static analysis"
+
+mkdir -p "$TMP/case4"
+cp -R "$FX" "$TMP/case4/fixtures"
+OUT="$(PR_NUMBER=487 STACK_PRS="486 487" run_ctx case4)"
+CTX="$TMP/case4/pr-context"
+want "$OUT" PR_CONTEXT present "a stack unit of two PRs"
+want "$OUT" SA_SIGNAL 6 "a stack unit gathers tool findings from every PR"
+grep -q "^## PR #486" "$CTX/body.md" && grep -q "^## PR #487" "$CTX/body.md" \
+  && ok "body.md has one section per PR" || bad "stacked body.md" "a section per PR" "$(head -3 "$CTX/body.md")"
+grep -q "PR #486 tool thread" "$CTX/sa-findings.md" \
+  && ok "sa-findings.md names the PR of each finding" || bad "stacked sa-findings.md" "PR tag" "missing"
+python3 -c 'import json,sys; t=json.load(open(sys.argv[1])); assert {x["pr"] for x in t} == {486, 487}' \
+  "$CTX/review-comments.json" && ok "review-comments.json merges threads from every PR" \
+  || bad "stacked review-comments.json" "threads tagged 486 and 487" "$(head -c 200 "$CTX/review-comments.json")"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

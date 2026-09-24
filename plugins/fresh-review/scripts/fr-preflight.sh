@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fr-preflight.sh [--mode review|pr] [--pr <number|url>] [--codex] [--arch-approved] — Step 1 + Step 2.
+# fr-preflight.sh [--mode review|pr] [--pr <number|url> [--since-pr <number>]] [--stack <refs>] [--codex] [--arch-approved] — Step 1 + Step 2.
 # Probes the repo, resolves the review scope, creates the run directory, and
 # writes the state file every later script reads.
 #
@@ -31,12 +31,16 @@ emit() { printf '%s\n' "$1"; }
 
 MODE=review
 PR_REF=""
+SINCE_PR=""
+STACK_REFS=""
 CODEX_REQUESTED=0
 ARCH_APPROVED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --mode)  MODE="${2:?--mode needs a value}"; shift 2 ;;
     --pr)    PR_REF="${2:?--pr needs a value}"; MODE=pr; shift 2 ;;
+    --since-pr) SINCE_PR="${2:?--since-pr needs a value}"; shift 2 ;;
+    --stack) STACK_REFS="${2:?--stack needs a value}"; shift 2 ;;
     --codex) CODEX_REQUESTED=1; shift ;;
     --arch-approved) ARCH_APPROVED=1; shift ;;
     *)       echo "fr-preflight: unknown argument '$1'" >&2; exit 2 ;;
@@ -46,6 +50,16 @@ case "$MODE" in
   review|pr) : ;;
   *) echo "fr-preflight: --mode must be review or pr, got '$MODE'" >&2; exit 2 ;;
 esac
+if [ -n "$STACK_REFS" ]; then
+  [ -z "$PR_REF" ] || { echo "fr-preflight: --stack and --pr cannot be combined" >&2; exit 2; }
+  MODE=stack
+fi
+if [ -n "$SINCE_PR" ]; then
+  [ -n "$PR_REF" ] || { echo "fr-preflight: --since-pr needs --pr" >&2; exit 2; }
+  case "$SINCE_PR" in
+    ''|*[!0-9]*) echo "fr-preflight: --since-pr must be a PR number, got '$SINCE_PR'" >&2; exit 2 ;;
+  esac
+fi
 
 # The plugin root of the copy that is actually running, resolved from this
 # script's own location rather than from an ambient CLAUDE_PLUGIN_ROOT the
@@ -96,7 +110,7 @@ fi
 # normal state from which you review someone else's PR, and a conflicted index
 # never gets touched because this mode neither stages nor commits.
 STOP_REASON=""
-if [ -n "$PR_REF" ]; then
+if [ -n "$PR_REF" ] || [ -n "$STACK_REFS" ]; then
   :
 elif [ -z "$INDEX_TREE" ]; then
   STOP_REASON="unmerged_index"
@@ -132,7 +146,9 @@ LOG_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)/fresh-review"
 # A --pr run names itself after the PR, not after whatever branch happened to be
 # checked out — the local branch is incidental there and makes the run directory
 # unfindable afterwards.
-if [ -n "$PR_REF" ]; then
+if [ -n "$STACK_REFS" ]; then
+  RUN_SLUG="stack-$(printf '%s' "$STACK_REFS" | grep -oE '[0-9]+' | head -1 || echo ref)"
+elif [ -n "$PR_REF" ]; then
   RUN_SLUG="pr-$(printf '%s' "$PR_REF" | grep -oE '[0-9]+$' || echo ref)"
 else
   RUN_SLUG="$(echo "$BRANCH" | tr '/' '-')"
@@ -154,6 +170,8 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
   kv SOURCE_ROOT "$REPO_ROOT"
   kv MODE "$MODE"
   kv PR_REF "$PR_REF"
+  kv SINCE_PR "$SINCE_PR"
+  kv STACK_REFS "$STACK_REFS"
   kv RUN_ID "$RUN_ID"
   kv RUN_DIR "$RUN_DIR"
   kv REPORT_DIR "$REPORT_DIR"
@@ -185,6 +203,8 @@ emit "RUN_DIR: $RUN_DIR"
 emit "STATE: $STATE"
 emit "MODE: $MODE"
 emit "PR_REF: ${PR_REF:-none}"
+emit "SINCE_PR: ${SINCE_PR:-none}"
+emit "STACK_REFS: ${STACK_REFS:-none}"
 emit "BRANCH: $BRANCH"
 emit "DIRTY: $DIRTY"
 emit "AHEAD: $AHEAD"
