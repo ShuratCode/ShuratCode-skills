@@ -4,8 +4,8 @@ description: |
   Pre-commit fresh-eyes code review. Orchestrates a context-isolated review pass that approximates what
   a new reviewer would catch — runs the lattice review and the gstack security audit against one shared
   diff packet, via subagents that cannot read design docs, intent, or prior session context. A
-  cross-model Codex pass is available on request and off by default: it runs only when the invocation
-  asks for it ("with codex", "cross-model review", "codex pass"). Triages findings against the
+  cross-model Codex pass is off by default: it runs when the invocation asks for it ("with codex",
+  "cross-model review", "codex pass"), and it is a must — no asking needed — when the diff is high-risk. Triages findings against the
   producer-context, prints the verdict and every finding to chat, and logs the run for later analysis.
 
   Does NOT run gstack's `/review` on your own branch. That skill is what `/ship` runs unconditionally
@@ -14,6 +14,13 @@ description: |
   `/ship` covers the structural specialists. The one exception is pr-remote (reviewing someone else's
   PR): there is no ship of yours to run those specialists, so that mode runs `/review` report-only as
   a pass.
+
+  Every mode starts with an **architecture gate**, before any other reviewer runs. One isolated pass
+  decides whether the change makes architecture design decisions (new components, changed
+  dependencies, new contracts, moved ownership, new cross-cutting mechanisms). If it does, the skill
+  shows the architecture change as a before/after diagram with pros and cons per decision, runs
+  gstack's `/plan-eng-review` report-only in a subagent against it, and hard-stops for the user's
+  approval. The implementation passes run only after approval. `--arch-approved` skips the gate.
 
   Use when the user asks to "fresh review", "fresh-eyes review", "review my changes", "pre-commit
   review", "review before commit", "review with no bias", "independent review", "what did I miss",
@@ -42,6 +49,7 @@ allowed-tools:
   - Glob
   - Agent
   - Write
+  - AskUserQuestion
 ---
 
 # fresh-review
@@ -56,7 +64,7 @@ The same separation turns out to be worth even more for *describing* a change th
 
 ## Modes
 
-Two output shapes, one machine. Every mode fans out the same critic passes against the same packet; a mode changes what *else* is produced and who the reader is. The critic passes are lattice and `/cso` always, plus Codex only when the invocation asked for it (see "The Codex opt-in" below).
+Two output shapes, one machine. Every mode fans out the same critic passes against the same packet; a mode changes what *else* is produced and who the reader is. The critic passes are lattice and `/cso` always, plus Codex when the invocation asked for it or the diff is high-risk (see "The Codex opt-in, and the high-risk rule" below).
 
 | The user's words | Preflight flags | Subject of the review | Chat output |
 |---|---|---|---|
@@ -72,15 +80,28 @@ Resolve the mode once, from the invocation, and pass it to `fr-preflight.sh`. Do
 - Any plain-English *"what does this do"* framing means `--mode pr` with no PR ref: same branch, same passes, plus the narrative.
 - Everything else is the default. When in doubt, default. The narrative is additive, so guessing `review` costs the user a paragraph; guessing `pr` on a plain pre-commit check costs a subagent.
 
-### The Codex opt-in
+### The Codex opt-in, and the high-risk rule
 
-**Codex (Pass C) is off by default and runs only when the invocation asks for it.** It is a separate `--codex` flag, orthogonal to `--mode` and `--pr` — add it to *any* of the three rows above. Resolve it once, from the invocation, alongside the mode:
+**Codex (Pass C) is off by default. It runs when the invocation asks for it, and it is a must when the change is high-risk.** It is a separate `--codex` flag, orthogonal to `--mode` and `--pr` — add it to *any* of the three rows above. Resolve it once, from the invocation, alongside the mode:
 
 - Pass `--codex` when the request names Codex or asks for cross-model coverage: "with codex", "codex pass", "cross-model review", "run codex too", "add a second model", "include the cross-model reviewer".
-- Otherwise **omit it** — a plain "fresh review", "pr review", or "review PR 42" gets the two Claude critics (lattice + `/cso`) and no Codex. Do not add it because a diff looks risky, large, or security-sensitive: risk gates `/cso`'s depth (Step 4), never Codex. The user asks or it does not run.
-- The flag is a request, not a guarantee: Pass C runs only when `--codex` was passed **and** `HAS_CODEX: 1`. If `--codex` was asked for but `codex` is not on PATH, say so (Step 1) — same as any other missing tool.
+- Otherwise **omit it** — a plain "fresh review", "pr review", or "review PR 42" on a normal-risk diff gets the two Claude critics (lattice + `/cso`) and no Codex. Do not add `--codex` yourself: the high-risk rule below is mechanical and needs no flag.
+- **High risk makes Codex a must.** When `fr-packet.sh` classifies `RISK: high` (Step 4), it sets `CODEX_REQUESTED=1` and `CODEX_REASON=risk` in `state.env` itself. In `pr` mode, a Pass K `RISK_LEVEL: high` on a mechanically normal diff does the same after the fan-out (Step 6). A required Codex has **no join budget**: the verdict waits for it. `CODEX_REASON` tells the two apart — `asked` (the user's flag), `risk` / `risk-pass` (forced), `none`.
+- The flag is a request, not a guarantee: Pass C runs only when `CODEX_REQUESTED: 1` **and** `HAS_CODEX: 1`. If Codex was asked for or required but `codex` is not on PATH, say so — same as any other missing tool. On a high-risk run that is a loud gap, not a footnote (Step 8).
 
 Everything downstream keys off `CODEX_REQUESTED` from `state.env`: Step 5 launches Pass C only when it is `1`, and the pass line, triage convergence, handoff, and log all treat an un-requested Codex as simply absent — distinct from a requested one that failed.
+
+### The architecture gate
+
+**Every mode reviews architecture before implementation.** Step 4.8 runs before any other reviewer. One cheap isolated pass (Pass D) decides whether the change makes architecture design decisions. When it finds none, the run goes on as before, with one extra line in chat. When it finds some, the skill:
+
+1. shows the architecture change as a rendered before/after diagram, with pros and cons for each decision;
+2. runs gstack's `/plan-eng-review` report-only in an isolated subagent (Pass E), scoped to architecture;
+3. asks the user to approve — and runs the implementation passes (Step 5) **only after the user approves**.
+
+The reason is order of cost. If the architecture is wrong, every implementation finding is about code that will be rewritten. The fan-out is the expensive part of a run, so it waits until the structure it reviews is agreed.
+
+This is the one place the skill stops for an answer. It never assumes approval: when no one can answer (AskUserQuestion is unavailable or fails), the run stops at the gate, restores the tree, and says how to continue. Pass `--arch-approved` to skip the gate — for a re-run after approving, or when the user says the architecture is already agreed ("architecture approved", "skip the architecture gate"). Resolve it once, from the invocation, like `--codex`.
 
 **`pr` mode adds two passes beyond the critics — N and K — plus a UI presence check.** Pass N (narrator) draws the changed flow as a Mermaid **sequence or flow diagram** in the repo's own DDD vocabulary, at the altitude of someone who owns the product and does not read code — a diagram, not a wall of summary prose. Pass K (risk) classifies the whole change `low` / `med` / `high` by blast radius and reversibility, so the reader sees the stakes next to the verdict. And Step 4.6 reports, in one line, whether the change touches frontend UI — it does **not** launch the app or take screenshots (launching a review tree is an RCE risk; see Step 4.6). Both passes run *alongside* the critics, never instead of them: a diagram or a risk label on an unreviewed change is how a change gets waved through on the strength of a good description.
 
@@ -112,9 +133,10 @@ DDD_DOC=".lattice/standards/ddd-principles.md"   # narrative vocabulary; resolve
 
 - Review scope is resolved mechanically by `fr-preflight.sh`: `branch` (merge-base..worktree) whenever an `origin/<base>` exists to merge-base against, `working` otherwise — or `pr` (merge-base..PR head), set by `fr-pr-resolve.sh` when a PR ref was given. `branch` matches what a human PR reviewer sees, and a Lattice `checkpoint_mode: continuous` session already has WIP commits on the branch that `working` scope would silently skip.
 - `/cso --diff` scopes the audit to changed files and keeps daily mode's 8/10 confidence gate. High-risk diffs upgrade to `--diff --comprehensive` (Step 4).
-- **Codex is opt-in.** When requested (`--codex`, see "The Codex opt-in") it runs as a full pass, in the background, concurrent with the others. When not requested it does not run at all, and the run has two critic passes rather than three. Rationale for the background invocation is in Pass C.
+- **Codex is opt-in, except on high risk.** When requested (`--codex`) or required (`RISK: high`, see "The Codex opt-in, and the high-risk rule") it runs as a full pass, in the background, concurrent with the others. Otherwise it does not run at all, and the run has two critic passes rather than three. Rationale for the background invocation is in Pass C.
 - **The diagram narrative and risk class are `pr` mode only.** Pass N draws the changed flow as a Mermaid diagram (rendered to PNG via `mmdc` when it is on `PATH`, otherwise printed as a fenced block); Pass K classifies the change `low`/`med`/`high`. Neither runs in the default pre-commit mode, which stays lean. The mechanical `RISK` (`normal`/`high`) from `fr-packet.sh` is unchanged and still gates `/cso` depth in every mode — it is a separate signal from Pass K's class.
 - **UI presence check is `pr`-mode only and never launches anything.** `fr-ui-detect.sh` reports whether the diff touches frontend UI and Step 4.6 prints one `UI preview — not shown: <reason>` line. It does **not** launch an app or take screenshots: a review tree may hold untrusted code and provenance is not mechanically decidable, so auto-launching it is an RCE risk (Step 4.6, "Why UI preview does not launch"). It never blocks the verdict.
+- **The architecture gate runs in every mode** (Step 4.8), before the fan-out. Pass D decides whether there are architecture design decisions; only when there are does Pass E (`/plan-eng-review`, report-only, architecture section) run and the user get asked to approve. `--arch-approved` skips it. The architecture diagram is rendered via `mmdc` like Pass N's, with the same fence fallback.
 - **PR context and static-analysis verification are producer-side and run whenever a PR exists.** `fr-pr-context.sh` (Step 4.7) gathers the PR's description, human discussion, and any static-analysis bot findings (Wiz, Snyk, SonarCloud, CodeQL, …) into `$RUN_DIR/pr-context/` — for triage and Pass W only, never for the isolated passes. When the PR carried analyzer findings (`SA_PRESENT: 1`), Pass W (Step 5) verifies each was fixed, suppressed, or dismissed, and an unaddressed one becomes a blocker under the static-analysis floor (Step 7). Both need `gh`; with no PR or no `gh` they self-skip cleanly and the run is unchanged.
 
 ## Why gstack's `/review` is not a pass here
@@ -129,7 +151,7 @@ The division of labor is therefore fixed, not configurable:
 |---|---|---|
 | Craft and standards conformance | Pass A (lattice) | — |
 | Security | Pass B (`/cso`, confidence-gated) | `security` specialist (ungated) |
-| Cross-model review | Pass C (`codex review`) — **only when `--codex` is requested** | Codex structured + adversarial |
+| Cross-model review | Pass C (`codex review`) — **when `--codex` is requested, and always on `RISK: high`** | Codex structured + adversarial |
 | performance, data-migration, api-contract, Red Team | **not covered** — *except pr-remote, where Pass R runs them* | owned here |
 | Plain-English account of the change | `pr` mode, Pass N | — |
 | Reviews which artifact | the pre-commit checkpoint, or a PR head | the final diff, post-fix, post-base-merge |
@@ -161,7 +183,7 @@ The same principle governs the shell work: every mechanical step is a script in 
 
 ## Workflow
 
-Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
+Steps run in order. Step 5 is one parallel fan-out; everything else is sequential. Steps are mode-conditional where their heading says so: **1.5** and **4.5** only run in the modes that need them, **4.6** (UI presence check) runs only in `pr` mode, **4.7** (PR context) runs in any mode when a PR is discoverable, **4.8** (architecture gate) runs in every mode unless `--arch-approved` and can end the run before Step 5, **3** and **8.6** are skipped in pr-remote, and Step 5's fan-out grows with the mode and the run — Pass N (narrative) and Pass K (risk) in `pr` mode, Pass R (the review army) additionally in pr-remote, and Pass W (static-analysis verification) in any mode when the PR carried analyzer findings. Nothing else branches on mode.
 
 Every script takes `$RUN_DIR` and reads the rest of its inputs from `$RUN_DIR/state.env`, which `fr-preflight.sh` creates and later scripts append to. You never have to thread variables between Bash calls by hand — and because state lives on disk, a run interrupted mid-way can still be restored on the next turn.
 
@@ -202,12 +224,13 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --mode pr          # pr mod
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42            # pr-remote (implies --mode pr)
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --codex            # review mode + Codex (Pass C)
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --pr 42 --codex    # pr-remote + Codex
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-preflight.sh" --arch-approved    # skip the architecture gate (Step 4.8)
 ```
 
 <!-- FR:BOOTSTRAP:START -->
 Run this with the plugin root from Step 0 set in the same shell — prefix the command with `CLAUDE_PLUGIN_ROOT="<the path Step 0 resolved>"`, since this fresh shell does not carry it.
 <!-- FR:BOOTSTRAP:END -->
-This probes the repo, resolves the review scope, creates the run directory, and writes `state.env` — including the plugin root itself, so no later step has to resolve it again. Export `RUN_DIR` from its output — every later script takes it as `$1`. Pass the flags from the Modes table verbatim, and add `--codex` only when the invocation asked for it (see "The Codex opt-in"); the script rejects an unknown flag or mode with a non-zero exit rather than falling back to a default, because a silently-defaulted `--pr` would review the local branch under someone else's PR number.
+This probes the repo, resolves the review scope, creates the run directory, and writes `state.env` — including the plugin root itself, so no later step has to resolve it again. Export `RUN_DIR` from its output — every later script takes it as `$1`. Pass the flags from the Modes table verbatim, add `--codex` only when the invocation asked for it (see "The Codex opt-in, and the high-risk rule" — high risk turns Codex on later, in Step 4, without the flag), and add `--arch-approved` only when the user said the architecture is already approved (see "The architecture gate"); the script rejects an unknown flag or mode with a non-zero exit rather than falling back to a default, because a silently-defaulted `--pr` would review the local branch under someone else's PR number.
 
 On `STATUS: stop`, tell the user and stop. `STOP_REASON` is one of:
 
@@ -222,10 +245,11 @@ On `STATUS: stop`, tell the user and stop. `STOP_REASON` is one of:
 Tool-availability accounting — state each of these up front, never silently:
 
 - `HAS_GSTACK: 0` → `/cso` does not exist here. **A critic pass cannot run.** Say so plainly, run Pass A (and Pass C if it was requested and available), label the verdict reduced-lens. Discovering this inside a subagent instead wastes the run and produces a report that looks complete but isn't. Note also that no gstack install means no `/ship` either, so the structural specialists this skill defers to will never run at all.
-- `CODEX_REQUESTED: 0` → the run did not ask for Codex; Pass C does not run and is absent by choice, not by failure. This is the default. Do not mention missing cross-model coverage as a gap — it was not requested. Only note, once, that `--codex` is available if the user wants a second model.
+- `CODEX_REQUESTED: 0` → the run did not ask for Codex. Step 4 still turns it on when `RISK: high`; re-read `CODEX_REQUESTED` from the packet output there. If it stays `0`, Pass C does not run and is absent by choice, not by failure. This is the default. Do not mention missing cross-model coverage as a gap — it was not requested. Only note, once, that `--codex` is available if the user wants a second model.
 - `CODEX_REQUESTED: 1` with `HAS_CODEX: 0` → Codex was asked for but `codex` is not on PATH, so Pass C **cannot** run. Say so plainly, run the Claude critics, label the verdict reduced-lens, and do not substitute a Claude pass for it. Fix is `codex login` (or installing the CLI) and re-run.
 - `CODEX_REQUESTED: 1` with `HAS_CODEX: 1` → Pass C runs (Step 5).
 - `HAS_GH: 0` → pr-remote is impossible. Only matters when a PR ref was given; Step 1.5 stops on it.
+- `ARCH_APPROVED: 1` → the user already approved the architecture; Step 4.8 is skipped. `ARCH_APPROVED: 0` is the default and the gate runs. Pass E needs gstack: with `HAS_GSTACK: 0` the gate still detects and shows the architecture (Pass D) and still asks, but without the `/plan-eng-review` findings — say so at the gate.
 - `CODEX_CFG: unknown` → `gstack-config` was not found, so the setting could not be read. Report unknown, never guess `enabled`. This setting gates *gstack's* internal Codex, not ours; Pass C runs on `CODEX_REQUESTED` and `HAS_CODEX`, never on this.
 
 Two other outputs matter later:
@@ -300,15 +324,16 @@ On `CHECKPOINT: failed`, continue in no-checkpoint mode: the packet builds from 
 
 Materializes the scope **once** into `$RUN_DIR/packet/` — `diff.patch`, `stat.txt`, `files.txt`, `scope.txt` — and classifies risk by pattern count over the patch, so the orchestrator sees integers rather than a diff. Every reviewer is handed these exact paths.
 
-`RISK: high` fires on any auth/payment/migration/secret path hit, any IaC file, more than three body hits, or more than 300 changed lines. It gates exactly one thing:
+`RISK: high` fires on any auth/payment/migration/secret path hit, any IaC file, more than three body hits, or more than 300 changed lines. It gates two things:
 
 | | normal | high-risk |
 |---|---|---|
 | `/cso` scope | `--diff` | `--diff --comprehensive` (2/10 bar, more surfaced) |
+| Codex (Pass C) | only when `--codex` | **required** — `CODEX_REQUESTED=1`, `CODEX_REASON=risk`, no join budget |
 
-Codex depth is deliberately *not* gated on risk. Whether Codex runs at all is decided by `--codex` at invocation, never by risk — a high-risk diff does not conscript Codex, and a requested Codex runs its structured review regardless of risk class. Since Pass C is off the critical path, there is nothing to save by varying its depth.
+The packet script prints `CODEX_REQUESTED` and `CODEX_REASON` after it applies the high-risk rule; those values, not preflight's, decide Step 5. Codex *depth* is not gated on risk — it always runs its structured review — only whether it runs and whether the verdict waits for it.
 
-State the file count and risk class out loud. If `LINES` exceeds ~2000, warn that reviewer quality degrades at that size and that a re-run scoped to a subdirectory reads more carefully — then **proceed anyway**. This skill never blocks on a question: it is meant to run unattended, including inside `/loop`. Every branch point resolves to a default and says which default it took.
+State the file count and risk class out loud. If `LINES` exceeds ~2000, warn that reviewer quality degrades at that size and that a re-run scoped to a subdirectory reads more carefully — then **proceed anyway**. This skill never blocks on a question — with one exception, the architecture gate (Step 4.8), which asks only when the change makes architecture decisions. It is meant to run unattended, including inside `/loop`. Every other branch point resolves to a default and says which default it took, and the gate itself never guesses: with no one to answer it stops, and `--arch-approved` is the way back in.
 
 ### Step 4.5: Resolve the domain vocabulary (pr mode only)
 
@@ -378,9 +403,159 @@ Two keys drive later steps:
 
 Token discipline is preserved exactly as everywhere else: the script prints only counts and the detected tool names. It never echoes a comment or a description back through stdout. `DISCUSSION_LINES` tells you how big `discussion.md` is, so Step 7 can decide whether to read it whole or skim it.
 
+### Step 4.8: Architecture gate (every mode)
+
+Skip when `ARCH_APPROVED: 1`. Print `Architecture gate: skipped — approved at invocation (--arch-approved)` and go to Step 5.
+
+This step runs **before any other reviewer**. It answers one question first: does this change make architecture design decisions? If it does, the user sees the architecture change and an engineering review of it, and approves it, before the implementation passes run. See "The architecture gate" for why.
+
+Three parts, in order: detect (Pass D), review (Pass E), ask.
+
+#### 4.8a: Pass D — detect the decisions
+
+**Pass D is the first reviewer of the run, and it runs alone.** Launch it in its own message: one subagent, no other subagent, no Codex command, no Step 5 work. Its prompt is the Step 5 isolation contract, verbatim, followed by this task, which replaces the contract's return-format block:
+
+> Your job is not to find defects. Decide whether this change makes **architecture design decisions**. If it does, show them.
+>
+> An architecture design decision is a structural choice that outlives this change — one another engineer would want to agree with before the code is written. Count it only when the diff shows one of these:
+>
+> - a new component, module, service, layer, or process — or one removed or merged;
+> - a changed dependency between components: a new edge, a reversed direction, a cycle, a skipped layer;
+> - a new external dependency that shapes the design: a framework, a datastore, a queue, a cache, a third-party service;
+> - a new or changed contract between components: a public API, an event, a schema, a file format, a CLI surface other code relies on;
+> - moved responsibility or data ownership: who owns a piece of state, where it is stored, who writes it;
+> - a new cross-cutting mechanism: caching, retries, a concurrency model, an auth mechanism, an error-propagation strategy, config loading.
+>
+> These are **not** architecture decisions: a bug fix inside one component, a refactor that keeps every boundary, new tests, docs, formatting, a version bump, a changed config value, or a new function in an existing module that follows that module's pattern. **When unsure, answer `no`.** The implementation passes still check structure (Pass A loads the architecture atom), so a missed small decision is still reviewed; a false `yes` stops the user for nothing.
+>
+> Name every decision with the file(s) in the diff that show it. A decision you cannot point to does not count.
+>
+> When the answer is `yes`, **draw the architecture change as one Mermaid `flowchart`** with two subgraphs, `Before` and `After`. Each shows the components involved and their dependencies. Rules:
+>
+> - Draw only the components this change touches, plus their direct neighbours. At most ~15 nodes across both subgraphs.
+> - Component, module, package, and service names are fine. Function names, line numbers, and code are not.
+> - Mark new nodes and edges in `After` with `:::added` and removed ones in `Before` with `:::removed`. Define both: `classDef added stroke-width:3px` and `classDef removed stroke-dasharray:5 5`.
+> - Keep it valid Mermaid — it will be rendered. Quote any label with punctuation. No HTML.
+>
+> Then give each decision its trade-offs, judged from the code alone: what the new structure makes easier, and what it costs (coupling, operational load, migration, a new failure mode, a contract others must now keep). At most three pros and three cons per decision. Do not state what the author intended — you have not been shown it.
+>
+> Write your full reasoning to `{{RUN_DIR}}/raw/architecture.md`. Return *only* this block:
+>
+> ```
+> PASS: architecture
+> STATUS: ok | partial | failed
+> ARCH_DECISIONS: yes | no
+> ---
+> DECISIONS
+> - D1: <the decision in one sentence> | evidence: <file>[, <file>]
+> ---
+> DIAGRAM: <one fenced mermaid flowchart, fence and all — or "none" when ARCH_DECISIONS is no>
+> ---
+> TRADEOFFS
+> - D1 + <what it makes easier>
+> - D1 − <what it costs>
+> ---
+> NOTES: <at most two lines, only if something anomalous happened>
+> FILES_READ: <comma-separated paths you opened>
+> ```
+
+Audit Pass D's `FILES_READ` against the forbidden list now, by the Step 6 rules. A Pass D that read a plan or `pr-context/` describes the author's claim, not the code. On a leak, re-spawn it once; on a second leak, prefix the gate block `[intent-contaminated]`.
+
+Then branch on its block:
+
+- `ARCH_DECISIONS: no` → record `ARCH_GATE='not_needed'` in `state.env`, print `Architecture: no design decisions in this change — reviewing the implementation.` and go to Step 5.
+- `STATUS: failed`, or no block → record `ARCH_GATE='failed'`, print `⚠ architecture gate did not run — Pass D failed` and go to Step 5. The gate is a filter in front of the review; it never blocks the review of a change it could not read. Name it in the Step 8 reduced-coverage line.
+- `ARCH_DECISIONS: yes` → continue to 4.8b.
+
+#### 4.8b: Show the architecture, then Pass E
+
+**Show the diagram first**, so the user reads it while Pass E runs. Write the DIAGRAM field's Mermaid source (without the fence) to `$RUN_DIR/ui/arch.mmd`, then render it:
+
+```bash
+mkdir -p "$RUN_DIR/ui" && mmdc -i "$RUN_DIR/ui/arch.mmd" -o "$RUN_DIR/ui/arch.png"
+```
+
+On success, `SendUserFile` the PNG and do not print the fence. When `mmdc` is missing or errors, print the ` ```mermaid ` fence instead — one or the other, never both, the same rule as Pass N's graph. Do not hand-fix invalid Mermaid; a diagram you drew carries your knowledge of the intent.
+
+Then print the decisions and their trade-offs:
+
+```
+ARCHITECTURE — <n> design decision(s) · <branch, or PR #<n>>
+
+D1. <decision>   (<evidence files>)
+    + <pro>
+    − <con>
+D2. ...
+
+Running /plan-eng-review on this architecture…
+```
+
+**Then launch Pass E** — one subagent, only when `HAS_GSTACK: 1`. Its prompt is the Step 5 isolation contract, verbatim, then:
+
+> Run `/plan-eng-review` as a **report-only engineering review of this change's architecture**. It is built as an interactive plan review. These rules override it wherever they conflict:
+>
+> - **Target:** the file `{{RUN_DIR}}/packet/diff.patch`. Name that path explicitly at its Scope gate, so it does not ask for a target. Trace surrounding code from `{{SOURCE_ROOT}}`. The decisions to focus on are in `{{RUN_DIR}}/raw/architecture.md` — written by another isolated pass from the code alone, so it is not author intent and you may read it.
+> - **Non-interactive:** run the skill's preamble command with `GSTACK_SESSION_KIND=spawned` in front of the `gstack-skill-start` call, so it echoes `SESSION_KIND: spawned` and auto-chooses the recommended option at every decision point. Never call AskUserQuestion.
+> - **Report file:** `{{RUN_DIR}}/raw/eng-review.md`. This is the output path you are explicitly given. Write nowhere else.
+> - **Run:** "Scope Challenge" and Section "1. Architecture review", in full. **Skip** Sections 2–4 (code quality, tests, performance): the implementation passes review those after the user approves the architecture.
+> - **Skip, by heading:** "Context Recovery", "Brain Context Load", "Brain Context (preflight)", "Prior Learnings", "Design Doc Check", "Prerequisite Skill Offer", the Scope Challenge's "Search check" and "TODOS cross-reference", any web research, "Outside Voice — Independent Plan Challenge", "TODOS.md updates", "Test Plan Artifact", the task JSONL artifact, steps 3–6 of "Required outputs" (Review Log, dashboard, navigation, learning hooks), the "EXIT PLAN MODE GATE", and "Telemetry". The design-doc, context, and learnings reads open the intent this pass must not see. The Review Log would mark ship's Eng Review row as done for a diff that is not the one that lands.
+> - When the skill reaches "Blocked outcome" because the Review Log was skipped, that is expected. Stop there and report.
+>
+> Return the standard compact block with `PASS: eng-review` — one line per finding from the Scope Challenge and Section 1. Use category slugs that start with `architecture-` (e.g. `architecture-coupling`, `architecture-failure-mode`).
+
+When Pass E returns, audit its `FILES_READ` (Step 6 rules), then run the mutation check now — Pass E drives a skill that writes files, and a write into the tree must be caught before the user approves anything:
+
+```bash
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-mutation-check.sh" "$RUN_DIR"
+```
+
+Handle `LEAK: detected` exactly as Step 6.5 does. The check is safe to run again after the fan-out.
+
+Print Pass E's findings under the decisions, severity-ordered and untriaged — they are triaged in Step 7 with everything else:
+
+```
+ENG REVIEW — /plan-eng-review, architecture only (<n> findings)
+1. <SEVERITY>  <file>:<line>  <problem>
+   → <fix>
+```
+
+With `HAS_GSTACK: 0`, print `ENG REVIEW — not run: no gstack install` instead, and ask anyway: the diagram and trade-offs are still worth a decision.
+
+#### 4.8c: Hard stop — ask for approval
+
+> **HARD STOP.** The run stops here until the user answers. This overrides "never blocks on a question" and every unattended default in this skill.
+>
+> - Do not launch any subagent, Codex command, or Step 5 work in the same message as the question, or before its answer arrives.
+> - Do not treat silence, a timeout, a tool error, or your own reading of the architecture as approval. Only the user's explicit approve answer opens the gate.
+> - Step 5 cannot start without it: its first action is `fr-arch-gate.sh`, which stays `closed` until `state.env` records `ARCH_GATE='approved'`.
+
+Call **AskUserQuestion** once:
+
+- question: `Approve this architecture and review the implementation?`
+- header: `Architecture`
+- options: `Approve — review implementation` (runs Step 5 onward) and `Reject — stop here` (the implementation is not reviewed).
+
+Record the answer in state. Write `approved` **only** after the user's approve answer has arrived:
+
+```bash
+echo "ARCH_GATE='approved'" >> "$RUN_DIR/state.env"    # or rejected / pending
+```
+
+- **Approved** → go to Step 5. Pass D and Pass E are not re-run. Pass E's block joins triage in Step 7. A free-text answer that approves, with notes, counts as approved; put the notes in `report.md`.
+- **Rejected** → skip Steps 5, 6, and 6.5. Go to Step 7 with Pass E's block as the only findings, then Step 8 (see its rejected-gate rules), skip Step 8.6, and run Steps 9 and 10. A free-text answer that does not approve counts as rejected; quote it in `report.md` as the reason.
+- **No answer possible** — AskUserQuestion is unavailable, or the call fails → `ARCH_GATE=pending`. **Never assume approval.** Print the pending block from Step 8, skip Steps 5 through 8.6, and run Steps 9 and 10. The user continues by re-running with `--arch-approved` once they agree with the architecture.
+
 ### Step 5: Fan out all reviewers (one parallel batch)
 
-Launch the Claude subagents **in a single message** — two in `review` mode (Pass A, Pass B), four in `pr` mode (adds Pass N narrative and Pass K risk), and five in pr-remote when `HAS_GSTACK: 1` (adds Pass R, the review army) — **plus Pass W (static-analysis verification) in any mode when `SA_PRESENT: 1`, and, only when `CODEX_REQUESTED: 1`, the Codex background command in the same message.** When Codex was not requested there is no Pass C to launch; the fan-out is Claude-only and everything downstream treats Codex as absent. When `SA_PRESENT: 0` there is no Pass W — the PR raised no analyzer findings, or there is no PR. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N, Pass K, and Pass W are cheap enough that adding them changes wall time by roughly nothing.
+Runs only after Step 4.8 cleared: no architecture decisions, the gate was skipped, Pass D failed, or the user approved. **Check it first, before launching anything:**
+
+```bash
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-arch-gate.sh" "$RUN_DIR"
+```
+
+`ARCH_GATE: open` → launch the fan-out below. `ARCH_GATE: closed` → **launch nothing.** `REASON` is `rejected` or `pending` (follow Step 4.8c's branch for it) or `not_decided` (Step 4.8 did not finish — go back and finish it). There is no override: the only ways to open the gate are the user's approval, a Pass D result, or `--arch-approved`.
+
+Launch the Claude subagents **in a single message** — two in `review` mode (Pass A, Pass B), four in `pr` mode (adds Pass N narrative and Pass K risk), and five in pr-remote when `HAS_GSTACK: 1` (adds Pass R, the review army) — **plus Pass W (static-analysis verification) in any mode when `SA_PRESENT: 1`, and, only when `CODEX_REQUESTED: 1` (asked for, or forced by `RISK: high`), the Codex background command in the same message.** When Codex was not requested there is no Pass C to launch; the fan-out is Claude-only and everything downstream treats Codex as absent. When `SA_PRESENT: 0` there is no Pass W — the PR raised no analyzer findings, or there is no PR. Codex overlapping the others is the entire reason it stopped being a latency problem, and Pass N, Pass K, and Pass W are cheap enough that adding them changes wall time by roughly nothing.
 
 **Pass W is not isolated, and it is launched in this same batch anyway.** It is the one pass that is *supposed* to read PR context — that is its whole job — so it takes a different contract (below) and is exempt from the forbidden-reads audit in Step 6. It reads `$RUN_DIR/pr-context/` and the packet; the isolated passes never touch either half of that.
 
@@ -644,9 +819,16 @@ Budget expectations: measured floor is ~30s on an *empty* diff (process start, g
 
 - **Done, rc=0** → compact it. Codex prepends repo instruction text and template scaffolding to its output, so do not read `codex.md` into your own context. Spawn one cheap compactor subagent: *"Read `$RUN_DIR/raw/codex.md`. It contains echoed instruction text and template scaffolding before the real content — ignore all of it. Return only the Step 5 compact block with `PASS: codex`, one line per genuine finding. No preamble."*
 - **Done, rc≠0** → read `codex.err`, record `CODEX_FAILED: <reason>`, continue.
-- **Still running past `CODEX_JOIN_BUDGET`** → proceed without it. The verdict ships labeled Claude-only, and when the background task exits you post the addendum (Step 8.5). Nothing is killed; the work completes and lands on disk either way.
+- **Still running past `CODEX_JOIN_BUDGET`** → when `CODEX_REASON` is `asked`, proceed without it. The verdict ships labeled Claude-only, and when the background task exits you post the addendum (Step 8.5). Nothing is killed; the work completes and lands on disk either way.
+- **Still running, and the run is high-risk** (`RISK: high`, or `CODEX_REASON` is `risk` / `risk-pass`) → **do not proceed.** Codex is required here, so the budget does not apply. Say `Codex ⧗ required for a high-risk change — waiting` and wait for the background task to exit; the harness re-invokes you when it does.
 
-Then audit isolation. Check each `FILES_READ:` line against the forbidden list — **for the isolated passes only (A, B, N, K, R)**. **Pass W is exempt:** reading `pr-context/**` is its assigned job, so a `pr-context/` path in *its* `FILES_READ` is expected, not a leak. Any *other* pass with a `pr-context/` path, on the other hand, is the most serious leak there is (see below).
+**Pass K raised the risk** (`pr` mode, `RISK_LEVEL: high`, but `CODEX_REQUESTED: 0` because the mechanical class was `normal`) → Codex is now required. Record it, then launch Pass C exactly as in Step 5 and wait for it as above:
+
+```bash
+printf "%s\n" "CODEX_REQUESTED='1'" "CODEX_REASON='risk-pass'" >> "$RUN_DIR/state.env"
+```
+
+Then audit isolation. Check each `FILES_READ:` line against the forbidden list — **for the isolated passes only (A, B, N, K, R)**. Pass D and Pass E were already audited at the gate (Step 4.8); carry those results into the report. **Pass W is exempt:** reading `pr-context/**` is its assigned job, so a `pr-context/` path in *its* `FILES_READ` is expected, not a leak. Any *other* pass with a `pr-context/` path, on the other hand, is the most serious leak there is (see below).
 
 - Clean → proceed.
 - Forbidden path present → note the leak, downgrade that pass's confidence (its *"by design"* concessions become suspect; its bug findings do not). Re-spawn only if the leak is material and the pass is cheap.
@@ -654,7 +836,7 @@ Then audit isolation. Check each `FILES_READ:` line against the forbidden list �
 
 Self-reporting is the only audit available for *reads* — a parent agent cannot inspect a subagent's tool trace, and it cannot see a `gh pr view` call at all. Treat this as a smoke detector, not a guarantee. (Step 6.5 is the one part of the contract that *is* mechanically verified; reads are not.)
 
-No remaining Claude pass natively hunts for intent — that was `/review`'s habit, and `/review` no longer runs here. So a forbidden read from Pass A, Pass B, or the compactor is genuinely anomalous rather than expected, and deserves more weight than a routine leak: investigate it instead of noting it and moving on.
+Among the fan-out passes, none natively hunts for intent — that was `/review`'s habit, and `/review` no longer runs here. (Pass E's `/plan-eng-review` does hunt for design docs, which is why its prompt names those steps to skip and why it is audited at the gate.) So a forbidden read from Pass A, Pass B, or the compactor is genuinely anomalous rather than expected, and deserves more weight than a routine leak: investigate it instead of noting it and moving on.
 
 **A forbidden read by Pass N is worse than any other pass's,** and is the one leak that should make you discard output rather than downgrade it. A critic that peeked at a design doc produces findings that are still findings. A narrator that peeked at a plan, a commit message, a PR title, or anything under `pr-context/` produces a narrative that has quietly become a *restatement of the author's claim* — indistinguishable in form from an independent reading, and it destroys the only property that made the narrative worth printing. On a Pass N leak: label the narrative `[intent-contaminated]` in the Step 8 output, or re-spawn it. Never print it clean.
 
@@ -686,7 +868,7 @@ Record any violation, and treat that pass's findings as still valid but its judg
 
 ### Step 7: Triage
 
-You are back in the producer context with full knowledge of design intent. Work from the compact blocks — **neither Pass N's nor Pass K's is among them**; the narrative carries no findings and the risk pass reports a class, not defects, so both stay out of triage entirely. Pass K's `RISK_LEVEL` feeds the header and the verdict framing, never a bucket. **Pass W's block *is* among them**, tagged `static-analysis` — its `UNADDRESSED` lines are findings and enter triage like any critic's, under the static-analysis floor below.
+You are back in the producer context with full knowledge of design intent. Work from the compact blocks — **neither Pass N's nor Pass K's is among them**; the narrative carries no findings and the risk pass reports a class, not defects, so both stay out of triage entirely. Pass K's `RISK_LEVEL` feeds the header and the verdict framing, never a bucket. **Pass W's block *is* among them**, tagged `static-analysis` — its `UNADDRESSED` lines are findings and enter triage like any critic's, under the static-analysis floor below. **So is Pass E's**, tagged `eng-review`, whenever the architecture gate ran it. Pass D's is not: it reports decisions, not defects.
 
 **When `PR_CONTEXT: present`, read the PR context now — this is the producer's privilege the isolated passes were denied.** Read `$RUN_DIR/pr-context/body.md` always, and `$RUN_DIR/pr-context/discussion.md` to check surviving findings against what the PR already settled (skim it rather than reading whole when `DISCUSSION_LINES` is large). Use it two ways, and only these two:
 
@@ -713,6 +895,7 @@ Three overrides:
   | `codex` + `lattice`, or `codex` + `cso` | different model family, separate process, no shared context | **strongest** — treat as near-confirmed; bucket 2 needs an explicit citation |
   | `review` + any of `cso`/`lattice` | same model family, but a separate process running a different specialist army with its own internal cross-model adversarial pass | moderate-to-strong |
   | `cso` + `lattice` | same model, but different checklists and a confidence gate on one side | moderate |
+  | `eng-review` + `lattice` or `cso` | same model, different skill and checklist, run before the other and blind to it | moderate |
 
   The two `codex` rows exist only when Codex ran — i.e. `--codex` was requested and it succeeded. The `review` row exists only on pr-remote runs with gstack. **On a default (Codex-off) run the only convergence available is `cso` + `lattice`, the moderate row**, and that is expected, not a defect. Do not manufacture cross-model agreement that no pass produced.
 
@@ -724,6 +907,8 @@ Three overrides:
 - **Bucket 4 requires that you opened the file.** Claiming a reviewer misread code you have not read yourself, in a change you did not write, is a guess. Without the read, it stays in bucket 1.
 - **The verdict vocabulary is `APPROVE` / `APPROVE-WITH-COMMENTS` / `REQUEST-CHANGES`.** Bucket 1 non-empty means `REQUEST-CHANGES`.
 - Findings are **comments, not fixes.** Phrase the `→ fix:` line as what you would ask for, and never edit the PR's code.
+
+**After a rejected architecture gate**, Pass E's findings are the only input. Triage them the same way. The verdict is `DO-NOT-COMMIT` (pr-remote: `REQUEST-CHANGES`) whatever the buckets hold: the user rejected the architecture, and that is the blocker.
 
 Write the merged pre-triage findings to `$RUN_DIR/findings.tsv` for the log.
 
@@ -760,6 +945,7 @@ Then the review block:
 FRESH REVIEW — <COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT>
                  (pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES)
 <branch, or PR #<n> @ <short sha>> · <N> files, +<a>/−<b> · risk: <low|med|high> · <elapsed>
+architecture: <approved (<n> decisions) | no design decisions | skipped (--arch-approved)>   (always)
 static analysis (<tool>): <total> raised — <fixed> fixed, <suppressed> suppressed, <dismissed> dismissed, <unaddressed> unaddressed   (only when Pass W ran)
 ⚠ reduced coverage: <what was missing>                               (only when a pass failed / was unavailable)
 
@@ -787,18 +973,26 @@ Rules:
 - The verdict is the first line of the review block, and the narrative block is the only thing permitted above it. Never bury it under a preamble.
 - The context line carries `risk:` — **Pass K's class** (`low`/`med`/`high`) in `pr` mode, the mechanical `RISK` (`normal`/`HIGH`) in `review` mode. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical)`.
 - In pr-remote mode the context line names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open, so nobody acts on `REQUEST-CHANGES` for something that already landed.
+- **The `architecture` line always prints.** It tells the reader whether the structure was agreed before the findings below were produced. The diagram and trade-offs were already shown at the gate (Step 4.8); do not print them again here.
 - **The `static analysis` line prints only when Pass W ran** (`SA_PRESENT: 1`). It gives the reader the whole feature-1 answer in one line: how many the tool raised and how they broke down. Its `<unaddressed>` count equals the number of Pass W blockers below. Omit the line entirely when no analyzer findings were on the PR.
-- **The `⚠ reduced coverage` line prints only when the run actually lost a lens** — a critic pass failed, `HAS_GSTACK: 0`, a requested Codex could not run, or (pr-remote) Pass R could not run. Name what is missing in one line (e.g. `cso did not run — no gstack install`; `Pass R skipped — structural specialists and red-team not covered, and no /ship of yours reviews this PR`). On a clean full run, omit it. This is the one safety signal kept in chat; the exhaustive "what this skill structurally defers to /ship" note lives in `report.md`.
+- **The `⚠ reduced coverage` line prints only when the run actually lost a lens** — a critic pass failed, `HAS_GSTACK: 0`, a requested or required Codex could not run, or (pr-remote) Pass R could not run. On a high-risk run without Codex, say it plainly: `⚠ reduced coverage: Codex is required for high-risk changes and did not run (<reason>) — fix with codex login, then re-run`. Name what is missing in one line (e.g. `cso did not run — no gstack install`; `Pass R skipped — structural specialists and red-team not covered, and no /ship of yours reviews this PR`). On a clean full run, omit it. This is the one safety signal kept in chat; the exhaustive "what this skill structurally defers to /ship" note lives in `report.md`.
 - **Every finding from every pass appears here**, in one of the four buckets. Deduplicated, with its sources tagged, but never dropped and never deferred to the report file. A bucket with zero findings collapses to a single `BY DESIGN (0)` line.
 - Blockers get the full two-line treatment. The other three buckets get one line each. In pr-remote, blockers are phrased as `→ ask:` (comments, not fixes), matching the verdict vocabulary.
-- `[<sources>]` is the merged source list (`lattice`, `cso`, `review`, `codex`, `static-analysis`) — this is how the user sees which passes converged. `review` appears only on pr-remote runs; `static-analysis` only when Pass W ran.
+- `[<sources>]` is the merged source list (`lattice`, `cso`, `review`, `codex`, `static-analysis`, `eng-review`) — this is how the user sees which passes converged. `review` appears only on pr-remote runs; `static-analysis` only when Pass W ran; `eng-review` only when the architecture gate ran Pass E.
 - The `log:` line is a footer, not a substitute for anything above it.
+
+**When the architecture gate did not clear**, the review block changes:
+
+- **Rejected** → the verdict line is `FRESH REVIEW — DO-NOT-COMMIT` (pr-remote: `REQUEST-CHANGES`), and the architecture line reads `architecture: rejected — implementation not reviewed`. Print Pass E's triaged findings in the usual buckets. Add the user's reason if they gave one.
+- **Pending** → print `FRESH REVIEW — ARCHITECTURE PENDING`, then `architecture: <n> decisions awaiting approval — implementation not reviewed`, then `To continue: re-run with --arch-approved once you agree with the architecture above.` No buckets — nothing was triaged.
+
+In both cases the narrative block (pr mode) is not printed: Pass N never ran.
 
 If more than ~40 findings survive dedup, keep all blockers in full and collapse buckets 3 and 4 to counts plus their highest-severity three, noting the collapse. Do not collapse bucket 2 — an uncited "by design" is the thing most worth seeing.
 
 ### Step 8.5: Codex addendum (only when Codex landed late)
 
-**Only reachable when Codex was launched** (`CODEX_REQUESTED: 1`). A Codex-off run has no background task and never enters this step.
+**Only reachable when Codex was launched with `CODEX_REASON: asked` on a normal-risk run.** A Codex-off run has no background task, and a high-risk run waits for Codex before the verdict, so neither enters this step.
 
 When the background task reports completion after Step 8 has printed, compact it (Step 6) and post a short addendum — not a re-print of the whole review:
 
@@ -813,6 +1007,8 @@ Then update `$RUN_DIR/report.md` and set `codex.changed_verdict` in the run log.
 
 ### Step 8.6: Hand the run to `/ship`
 
+**Skip this step when the architecture gate did not clear** (`ARCH_GATE` is `rejected` or `pending`). No critic ran, so there is nothing to hand ship. Say `SHIP_GATE: n/a — architecture not approved`.
+
 **Skip this step entirely in pr-remote mode.** The handoff arms a gate on *your* next `/ship` of *your* branch; logging someone else's PR into it would suppress findings on a branch you never reviewed. Say `SHIP_GATE: n/a — reviewed PR #<n>, not this branch` and move on.
 
 **Run before Step 9** — it needs the checkpoint SHA, which the reset destroys.
@@ -825,7 +1021,7 @@ Build the pass list from the passes that actually ran and returned `STATUS: ok`.
 ```
 
 - `STATUS` is `clean` only when bucket 1 is empty; otherwise `issues_found`.
-- The fourth argument is the comma list of **critic** passes that returned `STATUS: ok` — drop any that failed or were unavailable, **and never include `codex` on a Codex-off run** (it never launched, so it covered nothing), and never include `narrative`, `risk`, or `static-analysis`. This is load-bearing, not bookkeeping: the ship-side gate only cuts ship's `testing`/`maintainability` specialists if `lattice` is in that list, and only cuts ship's Codex passes if `codex` is. Listing `codex` when it did not run would make ship **skip** its own Codex passes on the strength of a fresh-review pass that never happened — silently removing cross-model coverage from the final gate. The default (Codex-off) run must therefore hand ship `lattice,cso` and let ship run its own Codex. `narrative` and `risk` report no findings, and `static-analysis` maps to no ship specialist — listing any of them would claim coverage that nothing produced.
+- The fourth argument is the comma list of **critic** passes that returned `STATUS: ok` — drop any that failed or were unavailable, **and never include `codex` on a Codex-off run** (it never launched, so it covered nothing), and never include `narrative`, `risk`, `static-analysis`, `architecture`, or `eng-review`. This is load-bearing, not bookkeeping: the ship-side gate only cuts ship's `testing`/`maintainability` specialists if `lattice` is in that list, and only cuts ship's Codex passes if `codex` is. Listing `codex` when it did not run would make ship **skip** its own Codex passes on the strength of a fresh-review pass that never happened — silently removing cross-model coverage from the final gate. The default (Codex-off) run must therefore hand ship `lattice,cso` and let ship run its own Codex. `narrative`, `risk`, and `architecture` report no findings, and `static-analysis` and `eng-review` map to no ship specialist — listing any of them would claim coverage that nothing produced.
 - `findings.json` is a JSON array you write first. Rules for it:
   - **Only buckets 2, 3, and 4**, each as `action: "skipped"`. Those are the decisions worth carrying forward.
   - **Never log a bucket 1 (REAL BUG) finding.** Omitting it is deliberate: ship re-reviews it, which is the regression check on your fix. Logging it as `skipped` would suppress the one finding you most need re-verified.
@@ -868,10 +1064,11 @@ This must run even on abort or error. If the user interrupts mid-review, restori
 Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where the **long form** goes: the Step 8 chat output, plus everything trimmed off it (the full narrative sections `NEW OR CHANGED RULES` / `BOUNDARIES AND CONTRACTS` / `NOT IN THIS CHANGE`, the Pass K risk rationale and factor line, the full pass inventory line, the UI-preview line, the structural "not covered here — /ship owns …" note, the PR-context and static-analysis summary, the scope, and the isolation-audit result). Nothing that used to be in chat is lost; it just lives here now. Then write `$RUN_DIR/run.json`:
 
 ```json
-{"skill":"fresh-review","schema":8,"run_id":"<RUN_ID>",
+{"skill":"fresh-review","schema":9,"run_id":"<RUN_ID>",
  "ts_start":"<TS_START>","ts_end":"<now>","duration_s":0,
  "repo":"<repo>","branch":"<BRANCH>","base":"<BASE>",
- "mode":"<review|pr>","codex_requested":false,
+ "mode":"<review|pr>","codex_requested":false,"codex_reason":"<none|asked|risk|risk-pass>",
+ "architecture":{"gate":"<not_needed|approved|rejected|pending|skipped|failed>","decisions":0,"diagram":false},
  "pr":{"number":0,"url":"","state":"","head":"","drift":false},
  "pr_context":{"present":false,"comments":0,"reviews":0,"threads":0,"discussion_lines":0},
  "scope":"<REVIEW_SCOPE>","diff_base":"<DIFF_BASE>","checkpoint":"<CHECKPOINT_SHA>",
@@ -880,6 +1077,8 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
  "ui_preview":{"frontend":false,"reason":"<UI_REASON>"},
  "diff":{"files":0,"lines":0},
  "passes":[
+   {"name":"architecture","status":"ok","duration_s":0,"arch_decisions":"<yes|no>","isolation":"clean"},
+   {"name":"eng-review","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"lattice","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"cso","status":"ok","duration_s":0,"findings":0,"isolation":"clean"},
    {"name":"review","status":"ok","duration_s":0,"findings":0},
@@ -893,7 +1092,8 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
  "tools":{"gstack":0,"codex":0,"gh":0}}
 ```
 
-- Set `codex_requested` to whether `--codex` was passed (`CODEX_REQUESTED` from `state.env`). It is what tells cross-run analysis apart: a `codex` pass absent because it was never asked for versus one dropped because it failed.
+- **Set `architecture` from Step 4.8.** `gate` is `skipped` under `--arch-approved`, `failed` when Pass D failed, `not_needed` when Pass D found no decisions, and otherwise the `ARCH_GATE` answer. `decisions` is Pass D's count; `diagram` is whether one was shown. Omit the `architecture` pass when the gate was skipped, and the `eng-review` pass whenever Pass E did not launch (no decisions, gate skipped, or `HAS_GSTACK: 0`). When the gate did not clear, the implementation passes never launched — omit them too, and set `verdict` to `ARCH-PENDING` for a pending gate.
+- Set `codex_requested` from the final `CODEX_REQUESTED` in `state.env` (after Step 4 and Step 6 may have forced it), and `codex_reason` from `CODEX_REASON`. It is what tells cross-run analysis apart: a `codex` pass absent because it was never asked for versus one dropped because it failed.
 - **Omit the `codex` pass from `passes[]` when `codex_requested` is `false`** — a pass that never launched is not a pass that failed, and `codex_requested` already records the choice. When it was requested but failed or was unavailable, keep the entry with `"status":"failed"` so the failure stays visible.
 - Omit `pr` outside pr-remote mode, and both the `narrative` and `risk` passes outside `pr` mode — an absent pass and a failed one must stay distinguishable. Likewise omit `risk_level` (top-level) and the `ui_preview` object outside `pr` mode; they are pr-mode artifacts. `risk` (the mechanical class) is always present.
 - **Keep the mechanical `risk` and Pass K's `risk_level` distinct.** `risk` is `normal`/`high` from `fr-packet.sh`'s pattern count and gates `/cso` depth; `risk_level` is Pass K's `low`/`med`/`high` judgment and is what the header shows. In `review` mode `risk_level` is absent and only `risk` exists. When the `risk` pass failed, keep its entry with `"status":"failed"` and omit `risk_level`.
@@ -921,7 +1121,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - *Is the narrative telling anyone anything?* `narrative.title_mismatch` over many pr-remote runs is the direct measure. If it is never true, the mode is producing pleasant restatements and its isolation is not buying what it costs; if it is often true, PR descriptions in this repo are not to be trusted, which is worth knowing on its own. `narrative.diagram` alongside it says whether the diagram-first mode is actually drawing diagrams or mostly returning `none`.
 - *Does the risk class track reality?* `risk_level` against the triage counts over many runs answers whether the pass is calibrated: `high`-risk runs should not be the ones with zero real bugs *and* zero caution, and a repo where every change comes back `low` has a pass that has stopped discriminating.
 
-**Schema history.** `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
+**Schema history.** `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
 
 ## Failure modes and recovery
 
@@ -930,6 +1130,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **A pass returns nothing / errors** → log it as skipped, drop it from the `passes` list in Step 8.6, and continue. No single pass is blocking, but the verdict must name the absent lens.
 - **A pass ignores the compact return contract** and dumps prose → do not re-read it; note it in NOTES, extract findings from its `raw/` file with a compactor subagent as in Step 6.
 - **Codex times out / fails** (only possible when `--codex` was requested) → verdict ships Claude-only, `CODEX_FAILED` in the log, the `codex` pass kept with `"status":"failed"`. Never substitute a Claude pass for it. Fix is `codex login` and re-run.
+- **High-risk run without Codex** (`RISK: high` or Pass K `high`, and `HAS_CODEX: 0` or Codex failed) → a named gap, not a silent one. Print the high-risk reduced-coverage line (Step 8), keep the `codex` pass with `"status":"failed"`, and never substitute a Claude pass for it.
 - **Codex not requested** (`CODEX_REQUESTED: 0`, the default) → not a failure. Pass C never launches, the pass line omits `codex`, and the run log records `codex_requested:false` with no `codex` pass. Mention once that `--codex` adds a cross-model pass if the user wants it; do not treat its absence as reduced coverage.
 - **Subagent tries to fix code** → Step 6.5 catches it; `--revert` undoes it unless the checkpoint failed.
 - **Pass R (review army) not run** → in pr-remote with `HAS_GSTACK: 0`, or when the pass errors, log it as skipped/failed, surface it in the `⚠ reduced coverage` chat line (Step 8), record the full unowned-gap note in `report.md`, and continue. The verdict must name the missing structural lens, never imply ship will catch it.
@@ -954,6 +1155,16 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **PR head moves mid-review** (`HEAD_DRIFT: yes`) → not an error. Everything was reviewed at `PR_HEAD`; say so in the header and move on. Do not re-fetch — that would mix two commits' findings in one report.
 - **PR worktree survives the run** (`WORKTREE: failed`) → tell the user the path and that `git worktree remove --force <path>` clears it. Do not leave it undisclosed; it is a full checkout's worth of disk.
 
+- **Pass D finds architecture decisions** → the intended path. Show the diagram and trade-offs, run Pass E, ask (Step 4.8).
+- **Pass D fails** → do not block. Print `⚠ architecture gate did not run`, go to Step 5, name it in the reduced-coverage line, log `architecture.gate: failed`.
+- **Pass D returns invalid Mermaid** → print the decisions and trade-offs without a diagram, note `architecture ✗ diagram`, and still ask. Do not hand-fix it.
+- **Pass E fails, or `HAS_GSTACK: 0`** → show the diagram and trade-offs and ask anyway. Say `ENG REVIEW — not run: <reason>` at the gate, keep the `eng-review` pass with `"status":"failed"` when it launched, and continue.
+- **Pass E writes to the tree** → the gate's mutation check catches it before the question. Handle it as Step 6.5 does.
+- **The user rejects the architecture** → not a failure. Triage Pass E's findings, verdict `DO-NOT-COMMIT` (pr-remote: `REQUEST-CHANGES`), skip the handoff, restore, log.
+- **Step 5 reached with the gate closed** (`fr-arch-gate.sh` prints `ARCH_GATE: closed`) → launch nothing. Finish Step 4.8 (`not_decided`), or follow its rejected/pending branch.
+- **No one can answer the gate** (AskUserQuestion unavailable or failed) → `ARCH_GATE=pending`. Never assume approval. Print the pending block, restore, log, and point to `--arch-approved`.
+- **The session ends while the gate waits** → the checkpoint is still in place. On the next turn run `fr-restore.sh "$RUN_DIR"` first, as for any interrupted run, then ask whether to re-run with `--arch-approved`.
+
 ## What this skill does NOT do
 
 - **Run gstack's `/review` — except in pr-remote.** On your own branch this is deliberate: `performance`, `data-migration`, `api-contract`, and Red Team are `/ship`'s to run on the final diff (see "Why gstack's `/review` is not a pass here"). Reviewing someone else's PR there is no ship of yours to run them, so pr-remote runs `/review` report-only as Pass R — the one place this skill does invoke it.
@@ -968,21 +1179,23 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Feed PR context to the review passes.** The description, discussion, and bot findings gathered in Step 4.7 reach only the producer (triage) and Pass W. The critics and the narrator stay blind to them by design — that is the whole reason the gather writes to a producer-only directory the isolated passes are forbidden to read. If you find yourself handing `pr-context/` to Pass A, B, N, K, or R, you have broken the skill's central invariant.
 - **Modify the PR under review.** pr-remote mode is read-only on someone else's branch. Findings are comments; the worktree is disposable and gets deleted.
 - **Review a PR from another repo.** `foreign_repo` stops it. There is no local tree to materialize the head into, and a patch without its source tree produces reviewers reading the wrong file contents. Clone that repo and run there.
+- **Persist a `/plan-eng-review` result.** Pass E skips its Review Log on purpose. Ship's Eng Review row tracks the *final* diff, and a pre-commit architecture review is not that.
+- **Review implementation before the architecture is approved.** When Pass D finds design decisions, the implementation passes wait for the user's answer, and with no answer they do not run.
 - **Replace reading the diff.** The narrative is at product altitude by construction — no paths, no names, no code. It tells you what changed and what it means; it cannot tell you whether line 84 is right. It is an orientation and a cross-check, not a substitute for review, which is exactly why this mode never ships it without one.
 
 ## Examples
 
-**"fresh review my changes before I commit"** → the default run: Steps 1–10, `--codex` **not** passed; branch-scoped packet built once; two isolated Claude subagents (lattice + `/cso`), no Codex; verdict and every finding printed to chat; tree restored; run logged. No questions asked at any point.
+**"fresh review my changes before I commit"** → the default run: Steps 1–10, `--codex` **not** passed; branch-scoped packet built once; Pass D checks for architecture decisions first and finds none; two isolated Claude subagents (lattice + `/cso`), no Codex; verdict and every finding printed to chat; tree restored; run logged. No questions asked — the architecture gate asks only when Pass D finds design decisions.
 
 **"fresh review with codex"** / **"review my changes, cross-model too"** → `--codex`. Same run plus Pass C launched in the background alongside the two subagents; the run records the `codex` pass in `report.md`/`run.json`, and Step 8.5 posts an addendum in chat if it lands late. Everything else is identical to the default.
 
-**"review this before I push"** with `auth/` in the diff → `fr-packet.sh` returns `RISK: high` on `PATH_HITS`; `/cso` upgrades to `--diff --comprehensive`. Risk does **not** pull in Codex — this is still a two-source run unless the user also asked for `--codex`; the sources are triaged under the security floor.
+**"review this before I push"** with `auth/` in the diff → `fr-packet.sh` returns `RISK: high` on `PATH_HITS`; `/cso` upgrades to `--diff --comprehensive`, and Codex becomes a must (`CODEX_REASON: risk`) without the user asking. The verdict waits for Codex; the three sources are triaged under the security floor. Without `codex` on PATH, the verdict carries the high-risk reduced-coverage line.
 
 **"fresh review, then ship"** → the default (Codex-off) run, nothing added. The handoff hands ship `lattice,cso`, so ship trims its `testing`/`maintainability` specialists but **runs its own Codex** on the final diff. Had the run used `--codex`, the handoff would add `codex` and ship would trim its Codex passes too.
 
 **Codex still running when the Claude passes return** (a `--codex` run) → verdict prints as `codex ⧗ running`; the background task completes eight minutes later; Step 8.5 posts the addendum and records whether it moved the verdict.
 
-**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, the two Claude critics, plus Pass N (diagram), Pass K (risk), Step 4.5's vocabulary resolution, Step 4.6's UI presence check, and Step 4.7's PR-context gather if the branch has an open PR — no Codex, since it was not requested. Chat gets the rendered graph, one short paragraph, then the verdict and every finding — nothing else; the risk class, the factor breakdown, and any UI note go to `report.md`. Handoff and restore run as normal, because this is still your branch.
+**"pr review — what does this actually change?"** on your own branch → `--mode pr`. Same checkpoint, same packet, the two Claude critics, plus Pass N (diagram), Pass K (risk), Step 4.5's vocabulary resolution, Step 4.6's UI presence check, and Step 4.7's PR-context gather if the branch has an open PR — no Codex, since it was not requested and the diff is normal-risk. Chat gets the rendered graph, one short paragraph, then the verdict and every finding — nothing else; the risk class, the factor breakdown, and any UI note go to `report.md`. Handoff and restore run as normal, because this is still your branch.
 
 **"review PR 42"** → `--pr 42`. Step 1.5 resolves it, fetches `pull/42/head`, and builds a detached worktree; Step 3 is skipped; Step 4.7 gathers PR #42's description and discussion into `pr-context/` (producer-only); the two critics, Pass N, and Pass K read the PR's diff blind and open files from the PR's tree, and — because no `/ship` of yours will ever review this PR — Pass R runs gstack `/review` report-only in that worktree, adding `performance`, `data-migration`, `api-contract`, and Red Team coverage (add `--codex` for this skill's own cross-model pass too). Chat gets the graph, one paragraph, the `APPROVE-WITH-COMMENTS` verdict, and the findings; the risk class and pass inventory go to `report.md`. Triage may cite a maintainer's decision from the thread for bucket 2, no handoff runs, and Step 9 deletes the worktree. Your own uncommitted work is untouched throughout — and nothing is posted to the PR.
 
@@ -993,5 +1206,11 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 **"explain PR 42 for the standup"** with no `.lattice/standards/ddd-principles.md` → identical run, `VOCAB: atom-defaults`. The diagram and its annotations use generic domain terms and nouns lifted from the code's own naming, the report says so in one line, and the review still runs in full.
 
 **A tooling-only PR** — CI workflow and lockfile → Pass N returns `HEADLINE: this change has no domain meaning; it is CI and dependency work`, `DIAGRAM: none`, every domain section `none`; Pass K returns `RISK_LEVEL: high` on the IaC/operational surface. That is the correct output, printed as-is — no invented diagram. `RISK: high` (mechanical) still fires on the IaC path, so `/cso` runs comprehensive over it, and Step 4.6 records `UI preview — not shown: no frontend files in the diff` to `report.md`.
+
+**"fresh review"** on a branch that adds a new cache layer between the API and the database → Pass D returns `ARCH_DECISIONS: yes` with two decisions: a new cache component, and a new dependency from the API on it. The user sees a rendered Before/After diagram, pros (fewer DB reads) and cons (stale reads, a new failure mode when the cache is down), then Pass E's `/plan-eng-review` findings on the architecture. The skill asks. On `Approve`, the usual fan-out runs and Pass E's findings are triaged with the rest, tagged `eng-review`. On `Reject`, no implementation pass runs and the verdict is `DO-NOT-COMMIT`.
+
+**"fresh review"** on a bug fix inside one module → Pass D returns `ARCH_DECISIONS: no`. One line in chat — `Architecture: no design decisions in this change — reviewing the implementation.` — and the run is otherwise unchanged. No question is asked.
+
+**"fresh review, architecture approved"** → `--arch-approved`. Step 4.8 is skipped, and the run goes straight to the fan-out.
 
 **The PR title says "add refund support"; the narrative says a fee is recorded but never reversed** → the `⚠` mismatch line in Step 8, `title_mismatch: true` in the run log. This is the outcome the whole isolation contract exists to make possible.

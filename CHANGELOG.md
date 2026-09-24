@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.19.0 — 2026-09-24
+
+### `fresh-review` 0.10.0 → 0.11.0: architecture first, then implementation
+
+Every run now reviews architecture before implementation. A new Step 4.8 runs before any other
+reviewer.
+
+- **Pass D decides first, alone.** It is the first reviewer of the run and launches in its own
+  message, with nothing else running. One isolated subagent reads the diff and answers one question: does this
+  change make architecture design decisions? It counts new or removed components, changed
+  dependencies, new external dependencies, new or changed contracts, moved ownership, and new
+  cross-cutting mechanisms. Bug fixes, boundary-keeping refactors, tests, and docs do not count. When
+  unsure, it answers no.
+- **When it finds some, the user sees the architecture.** A rendered Before/After Mermaid diagram,
+  with the pros and cons of each decision.
+- **Pass E runs `/plan-eng-review` report-only in a subagent.** Scope Challenge and the Architecture
+  section only, non-interactive, blind to design docs and PR context, and without writing gstack's
+  review log (so ship's Eng Review row is not marked done for a non-final diff). Its findings are
+  shown at the gate and triaged later with the rest, tagged `eng-review`.
+- **Hard stop, then implementation.** The skill asks once and stops until the user answers. A new
+  script, `fr-arch-gate.sh`, is Step 5's first action: it keeps the fan-out closed until `state.env`
+  records an approval (or no decisions, a failed detector, or `--arch-approved`). Approve runs the usual
+  fan-out. Reject stops with `DO-NOT-COMMIT` (pr-remote: `REQUEST-CHANGES`). When no one can answer,
+  the run stops as `ARCH-PENDING` and never assumes approval.
+- **`--arch-approved`** skips the gate — for a re-run after approving, or when the architecture is
+  already agreed.
+
+### `fresh-review`: Codex is a must on high-risk diffs
+
+- When `fr-packet.sh` classifies `RISK: high`, it now turns Codex on itself (`CODEX_REQUESTED=1`,
+  `CODEX_REASON=risk`). In `pr` mode, a Pass K `high` on a normal diff does the same after the fan-out.
+- A required Codex has no join budget: the verdict waits for it. When `codex` is missing or fails on a
+  high-risk run, chat says so in a loud reduced-coverage line.
+
+Run-log schema bumped to `schema:9` (adds `codex_reason`, an `architecture` object, and optional
+`architecture` and `eng-review` passes). New test `tests/test-arch-gate.sh` covers the gate script and
+the high-risk Codex rule; `tests/test-review-mode.sh` covers the new preflight flag.
+
 ## 0.18.0 — 2026-09-22
 
 ### `upgrade-all` 0.6.0: discover installed plugins, surface uninstalled ones
