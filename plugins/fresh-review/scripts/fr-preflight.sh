@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fr-preflight.sh [--mode review|pr] [--pr <number|url> [--since-pr <number>]] [--stack <refs>] [--codex] [--arch-approved] — Step 1 + Step 2.
+# fr-preflight.sh [--mode review|pr] [--pr <number|url> [--since-pr <number>] [--delta]] [--stack <refs>] [--codex] [--arch-approved] — Step 1 + Step 2.
 # Probes the repo, resolves the review scope, creates the run directory, and
 # writes the state file every later script reads.
 #
@@ -18,7 +18,7 @@
 #   STOP_REASON: <slug>            (only when STATUS: stop)
 #   PLUGIN_ROOT                    (the running copy's root, also in state.env)
 #   RUN_DIR / STATE / MODE / PR_REF / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE
-#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / ARCH_APPROVED / CODEX_CFG / GSTACK_BIN
+#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / ARCH_APPROVED / DELTA_REQUESTED / CODEX_CFG / GSTACK_BIN
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_CMD
 #   === END ===
 #
@@ -35,6 +35,7 @@ SINCE_PR=""
 STACK_REFS=""
 CODEX_REQUESTED=0
 ARCH_APPROVED=0
+DELTA_REQUESTED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --mode)  MODE="${2:?--mode needs a value}"; shift 2 ;;
@@ -43,6 +44,7 @@ while [ $# -gt 0 ]; do
     --stack) STACK_REFS="${2:?--stack needs a value}"; shift 2 ;;
     --codex) CODEX_REQUESTED=1; shift ;;
     --arch-approved) ARCH_APPROVED=1; shift ;;
+    --delta) DELTA_REQUESTED=1; shift ;;
     *)       echo "fr-preflight: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -53,6 +55,9 @@ esac
 if [ -n "$STACK_REFS" ]; then
   [ -z "$PR_REF" ] || { echo "fr-preflight: --stack and --pr cannot be combined" >&2; exit 2; }
   MODE=stack
+fi
+if [ "$DELTA_REQUESTED" = 1 ] && [ -z "$PR_REF" ]; then
+  echo "fr-preflight: --delta needs --pr" >&2; exit 2
 fi
 if [ -n "$SINCE_PR" ]; then
   [ -n "$PR_REF" ] || { echo "fr-preflight: --since-pr needs --pr" >&2; exit 2; }
@@ -189,6 +194,7 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
   kv CODEX_REQUESTED "$CODEX_REQUESTED"
   kv CODEX_REASON "$([ "$CODEX_REQUESTED" = 1 ] && echo asked || echo none)"
   kv ARCH_APPROVED "$ARCH_APPROVED"
+  kv DELTA_REQUESTED "$DELTA_REQUESTED"
   kv CODEX_CFG "$CODEX_CFG"
   kv REVIEW_SCOPE "$REVIEW_SCOPE"
   kv DIFF_CMD "$DIFF_CMD"
@@ -216,6 +222,7 @@ emit "HAS_CODEX: $HAS_CODEX"
 emit "HAS_GH: $HAS_GH"
 emit "CODEX_REQUESTED: $CODEX_REQUESTED"
 emit "ARCH_APPROVED: $ARCH_APPROVED"
+emit "DELTA_REQUESTED: $DELTA_REQUESTED"
 emit "CODEX_CFG: $CODEX_CFG"
 emit "GSTACK_BIN: ${GSTACK_BIN:-none}"
 emit "SOURCE_ROOT: $REPO_ROOT"

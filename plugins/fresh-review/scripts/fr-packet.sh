@@ -47,6 +47,9 @@ RISK=normal
 if [ "$PATH_HITS" -gt 0 ] || [ "$IAC_HITS" -gt 0 ] || [ "$BODY_HITS" -gt 3 ] || [ "$LINES" -gt 300 ]; then
   RISK=high
 fi
+if [ "${DELTA:-}" = applied ] && [ "${DELTA_PRIOR_RISK:-}" = high ]; then
+  RISK=high
+fi
 
 CODEX_REQUESTED="${CODEX_REQUESTED:-0}"
 CODEX_REASON="${CODEX_REASON:-none}"
@@ -66,6 +69,10 @@ fi
   # user's checkout in pr-remote mode, and there getting it wrong means judging
   # the PR against a different commit's file contents.
   echo "SOURCE_ROOT=$SOURCE_ROOT"
+  if [ "${DELTA:-}" = applied ]; then
+    echo "DELTA=since-last-review"
+    echo "DELTA_PRIOR_HEAD=$DELTA_PRIOR_HEAD"
+  fi
 } > "$RUN_DIR/packet/scope.txt"
 
 {
