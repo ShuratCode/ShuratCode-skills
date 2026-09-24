@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.22.0 — 2026-09-24
+
+### `fresh-review` 0.13.0 → 0.14.0: `--delta` no longer falls back to a full review in silence
+
+A re-review of PR 3148 ran as a full review, and asked again about an architecture the user had
+approved an hour before. The first review ran from the desktop app's session snapshot of the plugin,
+which was still 0.12.0 and had no record step. So there was no record, `fr-delta.sh` said
+`no_prior_review`, and the skill ran the whole PR again.
+
+- **The run index is a fallback.** With no record, `fr-delta.sh` uses the newest `runs.jsonl` entry of
+  a finished pr-remote review of the PR, when its head and merge-base are still in the repo. The
+  earlier blockers come from that run's `findings.tsv` (bucket 1) when its run directory is still
+  there. A new `DELTA_SOURCE` line says `record` or `runs_index`.
+- **An explicit `--delta` asks and does not run the full review on its own.** A new outcome, `DELTA: ask`, covers three
+  cases: no earlier review (full review or stop), an earlier review that lost a lens, and an earlier
+  review whose blockers are unknown (only the changes, with the gap named, or the whole PR). The
+  script runs again with `--choice delta|full`. With no answer possible, the run stops.
+- **An approved architecture carries over.** The record keeps the gate (`arch_gate`) and the approved
+  decisions (`reviews/<key>.architecture.md`). Pass D reads them and marks each decision `new` or
+  `seen`. When all are `seen`, the gate is `carried`: no Pass E, no question.
+- **The running version is visible.** Step 0 prints `FR_PLUGIN_VERSION` from the loaded root, and
+  prefers the Skill tool's base directory as the root. Preflight prints `PLUGIN_VERSION`,
+  `PLUGIN_INSTALLED`, and `PLUGIN_STALE` (a session snapshot older than the install), and the run log
+  records `plugin_version`.
+
+- **The fallback trusts only local run data.** Run directories are looked up in the report dir and
+  in each worktree's git dir, never inside a PR worktree. Symlinked files are ignored. Stack-unit
+  entries are skipped, and the newest entry whose commits still exist wins. Coverage counts only the
+  lens passes: a missing review army means reduced, and a failed narrative pass does not. A clean
+  earlier review (a header-only `findings.tsv`) has zero blockers, not unknown ones.
+- **Approval survives edge cases.** A record from 0.13.0 takes its gate from the run index. A delta
+  whose Pass D failed keeps the earlier approval. A carried gate keeps the earlier decisions without
+  duplicating them, and prints each `seen` match.
+
+Run-log schema bumped to `schema:12` (`plugin_version`, `delta.source`, the `carried` gate).
+`tests/test-delta.sh` covers the run-index fallback, the ask and choice flow, the carried gate, and the
+version lines; `tests/test-arch-gate.sh` covers `carried`.
+
 ## 0.21.0 — 2026-09-24
 
 ### `fresh-review` 0.12.0 → 0.13.0: re-review only the delta
