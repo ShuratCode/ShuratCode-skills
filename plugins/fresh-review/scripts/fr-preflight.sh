@@ -179,7 +179,15 @@ elif [ -n "$PR_REF" ]; then
 else
   RUN_SLUG="$(echo "$BRANCH" | tr '/' '-')"
 fi
-RUN_ID="$(date +%Y%m%d-%H%M%S)-$RUN_SLUG"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+RUN_ID="$STAMP-$RUN_SLUG"
+mkdir -p "$REPORT_DIR/runs"
+N=1
+until mkdir "$REPORT_DIR/runs/$RUN_ID" 2>/dev/null; do
+  N=$((N + 1))
+  [ "$N" -le 100 ] || { echo "fr-preflight: cannot create a run directory under $REPORT_DIR/runs" >&2; exit 1; }
+  RUN_ID="$STAMP-$RUN_SLUG-$N"
+done
 RUN_DIR="$REPORT_DIR/runs/$RUN_ID"
 mkdir -p "$RUN_DIR/packet" "$RUN_DIR/raw" "$LOG_DIR"
 

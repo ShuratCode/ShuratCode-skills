@@ -80,6 +80,11 @@ want "$OUT" ARMY_REQUESTED 1 "--army asks for the review army"
 OUT="$(pre plain)"
 want "$OUT" ARMY_REQUESTED 0 "the review army is off by default"
 
+R1="$(cd "$TMP/pre-plain" && bash "$SCRIPTS/fr-preflight.sh" | grep '^RUN_DIR:')"
+R2="$(cd "$TMP/pre-plain" && bash "$SCRIPTS/fr-preflight.sh" | grep '^RUN_DIR:')"
+[ -n "$R1" ] && [ "$R1" != "$R2" ] && ok "two runs in the same second get their own run directory" \
+  || bad "run dir collision" "two different dirs" "$R1 / $R2"
+
 OUT="$(gate legacy "RUN_DIR='x'")"
 want "$OUT" ARCH_GATE closed "state.env without gate keys"
 

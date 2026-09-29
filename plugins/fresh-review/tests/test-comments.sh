@@ -21,8 +21,8 @@ ok()  { printf '  ok   %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '  FAIL %s\n       want %s / got %s\n' "$1" "$2" "$3"; FAIL=$((FAIL + 1)); }
 key() { printf '%s\n' "$1" | grep "^$2:" | head -1 | sed "s/^$2: //"; }
 want() { local got; got="$(key "$1" "$2")"; [ "$got" = "$3" ] && ok "$4 — $2=$3" || bad "$4" "$2=$3" "$2=$got"; }
-row()  { grep -q "$(printf '%s' "$1")" "$TMP/run/packet/comments.tsv" && ok "$2" || bad "$2" "$1" "$(cat "$TMP/run/packet/comments.tsv")"; }
-norow(){ grep -q "$(printf '%s' "$1")" "$TMP/run/packet/comments.tsv" && bad "$2" "no row for $1" "$(cat "$TMP/run/packet/comments.tsv")" || ok "$2"; }
+row()  { grep -qF "$(printf '%b' "$1")" "$TMP/run/packet/comments.tsv" && ok "$2" || bad "$2" "$1" "$(cat "$TMP/run/packet/comments.tsv")"; }
+norow(){ grep -qF "$(printf '%b' "$1")" "$TMP/run/packet/comments.tsv" && bad "$2" "no row for $1" "$(cat "$TMP/run/packet/comments.tsv")" || ok "$2"; }
 
 scan() {
   rm -rf "$TMP/run"; mkdir -p "$TMP/run/packet"

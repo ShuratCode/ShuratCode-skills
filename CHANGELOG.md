@@ -35,6 +35,8 @@ and the stop asked "approve or reject".
   report at most 10 findings. Noise and misread findings are one count line in chat.
 - **Token rule.** The orchestrator never opens a rendered PNG and never re-reads SKILL.md. Past runs
   spent 370k tokens on those two.
+- **Run directories no longer collide.** Two runs that started in the same second shared one run
+  directory, so one run could read the other's `delta/` files. Preflight now adds a `-<n>` suffix.
 
 Run-log schema bumped to `schema:13` (`lattice_context`, `army_requested`, `comments`,
 `triage.should_fix`, gate values `waived` and `trivial`, and the `understanding` and `implementation`
