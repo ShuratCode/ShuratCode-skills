@@ -66,8 +66,11 @@ def run_dir_of(run_id):
     return None
 
 def architecture_in(run_dir):
-    path = os.path.join(run_dir, "raw", "architecture.md") if run_dir else None
-    return path if regular_file(path) else None
+    for name in ("understanding.md", "architecture.md"):
+        path = os.path.join(run_dir, "raw", name) if run_dir else None
+        if regular_file(path):
+            return path
+    return None
 
 def gate_of(entry):
     gate = (entry.get("architecture") or {}).get("gate") or "none"
@@ -123,9 +126,15 @@ def has_commits(entry):
                for sha in (entry["pr"]["head"], entry["diff_base"]))
 
 def coverage_of(entry):
-    lenses = ("lattice", "cso", "review", "codex", "fix-check", "static-analysis")
+    lenses = ("implementation", "lattice", "cso", "review", "codex", "fix-check", "static-analysis")
     status = {p.get("name"): p.get("status") for p in entry.get("passes") or []}
-    needed = {"lattice", "cso", "review"} | ({"codex"} if entry.get("codex_requested") else set())
+    if entry.get("schema", 0) >= 13:
+        needed = {"implementation", "cso"} \
+            | ({"lattice"} if entry.get("lattice_context") else set()) \
+            | ({"review"} if entry.get("army_requested") else set())
+    else:
+        needed = {"lattice", "cso", "review"}
+    needed |= {"codex"} if entry.get("codex_requested") else set()
     lost = any(status.get(name) != "ok" for name in needed) or \
         any(status[name] != "ok" for name in lenses if name in status) or \
         (entry.get("architecture") or {}).get("gate") == "failed"

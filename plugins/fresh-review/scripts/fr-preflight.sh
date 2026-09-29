@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fr-preflight.sh [--mode review|pr] [--pr <number|url> [--since-pr <number>] [--delta]] [--stack <refs>] [--codex] [--arch-approved] — Step 1 + Step 2.
+# fr-preflight.sh [--mode review|pr] [--pr <number|url> [--since-pr <number>] [--delta]] [--stack <refs>] [--codex] [--army] [--understood] — Step 1 + Step 2.
 # Probes the repo, resolves the review scope, creates the run directory, and
 # writes the state file every later script reads.
 #
@@ -19,7 +19,7 @@
 #   PLUGIN_ROOT                    (the running copy's root, also in state.env)
 #   PLUGIN_VERSION / PLUGIN_INSTALLED / PLUGIN_STALE   (the running copy's version vs the newest install)
 #   RUN_DIR / STATE / MODE / PR_REF / BRANCH / DIRTY / AHEAD / BASE / DIFF_BASE
-#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / ARCH_APPROVED / DELTA_REQUESTED / CODEX_CFG / GSTACK_BIN
+#   INDEX_TREE / HAS_GSTACK / HAS_CODEX / HAS_GH / CODEX_REQUESTED / ARMY_REQUESTED / ARCH_APPROVED / DELTA_REQUESTED / CODEX_CFG / GSTACK_BIN
 #   SOURCE_ROOT / REVIEW_SCOPE / DIFF_CMD
 #   === END ===
 #
@@ -35,6 +35,7 @@ PR_REF=""
 SINCE_PR=""
 STACK_REFS=""
 CODEX_REQUESTED=0
+ARMY_REQUESTED=0
 ARCH_APPROVED=0
 DELTA_REQUESTED=0
 while [ $# -gt 0 ]; do
@@ -44,7 +45,8 @@ while [ $# -gt 0 ]; do
     --since-pr) SINCE_PR="${2:?--since-pr needs a value}"; shift 2 ;;
     --stack) STACK_REFS="${2:?--stack needs a value}"; shift 2 ;;
     --codex) CODEX_REQUESTED=1; shift ;;
-    --arch-approved) ARCH_APPROVED=1; shift ;;
+    --army)  ARMY_REQUESTED=1; shift ;;
+    --understood|--arch-approved) ARCH_APPROVED=1; shift ;;
     --delta) DELTA_REQUESTED=1; shift ;;
     *)       echo "fr-preflight: unknown argument '$1'" >&2; exit 2 ;;
   esac
@@ -213,6 +215,7 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
   kv HAS_GH "$HAS_GH"
   kv CODEX_REQUESTED "$CODEX_REQUESTED"
   kv CODEX_REASON "$([ "$CODEX_REQUESTED" = 1 ] && echo asked || echo none)"
+  kv ARMY_REQUESTED "$ARMY_REQUESTED"
   kv ARCH_APPROVED "$ARCH_APPROVED"
   kv DELTA_REQUESTED "$DELTA_REQUESTED"
   kv CODEX_CFG "$CODEX_CFG"
@@ -244,6 +247,7 @@ emit "HAS_GSTACK: $HAS_GSTACK"
 emit "HAS_CODEX: $HAS_CODEX"
 emit "HAS_GH: $HAS_GH"
 emit "CODEX_REQUESTED: $CODEX_REQUESTED"
+emit "ARMY_REQUESTED: $ARMY_REQUESTED"
 emit "ARCH_APPROVED: $ARCH_APPROVED"
 emit "DELTA_REQUESTED: $DELTA_REQUESTED"
 emit "CODEX_CFG: $CODEX_CFG"
