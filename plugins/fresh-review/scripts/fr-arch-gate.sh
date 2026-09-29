@@ -12,7 +12,8 @@ else
   case "${ARCH_GATE:-}" in
     approved)   GATE=open;   REASON=approved ;;
     carried)    GATE=open;   REASON=approved_at_last_review ;;
-    not_needed) GATE=open;   REASON=not_needed ;;
+    trivial|not_needed) GATE=open; REASON=not_needed ;;
+    waived)     GATE=open;   REASON=waived ;;
     failed)     GATE=open;   REASON=detector_failed ;;
     rejected)   GATE=closed; REASON=rejected ;;
     pending)    GATE=closed; REASON=pending ;;

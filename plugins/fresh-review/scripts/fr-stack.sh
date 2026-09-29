@@ -7,7 +7,7 @@
 #   REASON: <slug>                   (only when unresolved)
 #   STACK_ID / PRS / FORK_AT
 #   NEXT: review_here | handoff
-#   REVIEW_ARGS: --pr <n> [--codex]          (only when NEXT: review_here)
+#   REVIEW_ARGS: --pr <n> [--codex] [--army]          (only when NEXT: review_here)
 #   UNITS / UNIT_<k> / PLAN / HANDOFF_DIR    (only when NEXT: handoff)
 #   UNIT_<k>: prs=<n,n> lines=<n> files=<n> risk=<normal|high>
 #   === END ===
@@ -266,6 +266,8 @@ def handoff_text(unit, k, units, rereview=False):
         args += " --delta"
     if env.get("CODEX_REQUESTED") == "1":
         args += " --codex"
+    if env.get("ARMY_REQUESTED") == "1":
+        args += " --army"
     if len(unit["prs"]) == 1:
         scope = f"- Review PR #{top} on its own: from its base branch to its head."
     else:
@@ -292,7 +294,7 @@ def handoff_text(unit, k, units, rereview=False):
         "Rules for this session",
         "- The flags on the first line are final. Run the full fresh-review flow with them. "
         "This is not a stack request.",
-        "- The architecture gate applies to this unit on its own.",
+        "- The understanding check applies to this unit on its own.",
         "- Keep this handoff out of every reviewer subagent. Reviewers get the packet only.",
         "- A later PR in the stack may change this code. A finding still counts here: "
         "it belongs to the PR that adds the code.",
@@ -347,7 +349,8 @@ def write_run_json(chain, units, fork_at):
 
 
 def review_here(pr):
-    args = f"--pr {pr['number']}" + (" --codex" if env.get("CODEX_REQUESTED") == "1" else "")
+    args = (f"--pr {pr['number']}" + (" --codex" if env.get("CODEX_REQUESTED") == "1" else "")
+            + (" --army" if env.get("ARMY_REQUESTED") == "1" else ""))
     kv("STACK_RESOLVED", "1")
     kv("STACK_PRS", pr["number"])
     kv("STACK_NEXT", "review_here")

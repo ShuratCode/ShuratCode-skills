@@ -37,7 +37,7 @@ case "$COVERAGE" in
 esac
 
 case "${ARCH_APPROVED:-0}:${ARCH_GATE:-}:${DELTA:-}:${DELTA_PRIOR_ARCH_GATE:-}" in
-  1:*|*:approved:*|*:carried:*|*:not_needed:applied:approved|*:failed:applied:approved) ARCH_RECORD=approved ;;
+  1:*|*:approved:*|*:carried:*|*:not_needed:applied:approved|*:trivial:applied:approved|*:failed:applied:approved) ARCH_RECORD=approved ;;
   *) ARCH_RECORD="${ARCH_GATE:-none}" ;;
 esac
 export ARCH_RECORD
@@ -70,7 +70,8 @@ PY
 ) || { rm -f "$RECORD.tmp"; failed bad_blockers; }
 
 PRIOR_ARCH="$RUN_DIR/delta/prior-architecture.md"
-CURRENT_ARCH="$RUN_DIR/raw/architecture.md"
+CURRENT_ARCH="$RUN_DIR/raw/understanding.md"
+[ -f "$CURRENT_ARCH" ] || CURRENT_ARCH="$RUN_DIR/raw/architecture.md"
 if [ "$ARCH_RECORD" = approved ]; then
   if [ "${ARCH_GATE:-}" = approved ]; then
     { [ "${DELTA:-}" = applied ] && cat "$PRIOR_ARCH" 2>/dev/null; cat "$CURRENT_ARCH" 2>/dev/null; } > "$ARCH_FILE.tmp"

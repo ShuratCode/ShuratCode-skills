@@ -16,13 +16,15 @@ want() {
   [ "$got" = "$3" ] && ok "$4 — $2=$3" || bad "$4" "$2=$3" "$2=$got"
 }
 
+G() { git -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+
 gate() {
   local dir="$TMP/run-$1"; mkdir -p "$dir"
   printf '%s\n' "${@:2}" > "$dir/state.env"
   bash "$SCRIPTS/fr-arch-gate.sh" "$dir"
 }
 
-printf '\n\033[1mfresh-review architecture gate\033[0m\n'
+printf '\n\033[1mfresh-review understanding gate\033[0m\n'
 
 OUT="$(gate undecided "ARCH_APPROVED='0'")"
 want "$OUT" ARCH_GATE closed "no gate outcome recorded"
@@ -54,10 +56,38 @@ OUT="$(gate flag "ARCH_APPROVED='1'")"
 want "$OUT" ARCH_GATE open "--arch-approved"
 want "$OUT" REASON approved_at_invocation "--arch-approved"
 
+OUT="$(gate trivial "ARCH_APPROVED='0'" "ARCH_GATE='trivial'")"
+want "$OUT" ARCH_GATE open "trivial change needs no check"
+
+OUT="$(gate waived "ARCH_APPROVED='0'" "ARCH_GATE='waived'")"
+want "$OUT" ARCH_GATE open "the user waived the check"
+want "$OUT" REASON waived "the user waived the check"
+
+pre() { # flags...
+  local repo="$TMP/pre-$1"; mkdir -p "$repo"; shift
+  G -C "$repo" init -q -b main
+  printf 'a\n' > "$repo/a.txt"; G -C "$repo" add -A; G -C "$repo" commit -q -m base
+  printf 'b\n' >> "$repo/a.txt"
+  (cd "$repo" && bash "$SCRIPTS/fr-preflight.sh" "$@")
+}
+
+OUT="$(pre understood --understood)"
+want "$OUT" ARCH_APPROVED 1 "--understood skips the check"
+OUT="$(pre legacyflag --arch-approved)"
+want "$OUT" ARCH_APPROVED 1 "--arch-approved still works"
+OUT="$(pre army --army)"
+want "$OUT" ARMY_REQUESTED 1 "--army asks for the review army"
+OUT="$(pre plain)"
+want "$OUT" ARMY_REQUESTED 0 "the review army is off by default"
+
+R1="$(cd "$TMP/pre-plain" && bash "$SCRIPTS/fr-preflight.sh" | grep '^RUN_DIR:')"
+R2="$(cd "$TMP/pre-plain" && bash "$SCRIPTS/fr-preflight.sh" | grep '^RUN_DIR:')"
+[ -n "$R1" ] && [ "$R1" != "$R2" ] && ok "two runs in the same second get their own run directory" \
+  || bad "run dir collision" "two different dirs" "$R1 / $R2"
+
 OUT="$(gate legacy "RUN_DIR='x'")"
 want "$OUT" ARCH_GATE closed "state.env without gate keys"
 
-G() { git -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
 packet() {
   local repo="$TMP/repo-$1" dir="$TMP/pk-$1"
   mkdir -p "$repo" "$dir/packet"

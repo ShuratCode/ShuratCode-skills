@@ -399,6 +399,43 @@ PY2
 review indexnoarmy --delta
 want "$TMP/indexnoarmy.out" DELTA_REASON prior_reduced_coverage "an indexed review with no review army pass"
 restore
+python3 - "$INDEX" <<'PY2'
+import json, sys
+lines = [json.loads(l) for l in open(sys.argv[1])]
+for e in lines:
+    if e["run_id"] == "20260101-000000-pr-42":
+        e["schema"] = 13
+        e["lattice_context"] = False
+        e["army_requested"] = False
+        e["passes"] = [{"name": n, "status": "ok"} for n in ("understanding", "implementation", "cso")]
+open(sys.argv[1], "w").write("".join(json.dumps(e) + "\n" for e in lines))
+PY2
+review s13full --delta
+want "$TMP/s13full.out" DELTA applied "a schema-13 review without lattice or army by choice has full coverage"
+restore
+python3 - "$INDEX" <<'PY2'
+import json, sys
+lines = [json.loads(l) for l in open(sys.argv[1])]
+for e in lines:
+    if e["run_id"] == "20260101-000000-pr-42":
+        e["schema"] = 13
+        e["lattice_context"] = True
+        e["army_requested"] = False
+        e["passes"] = [{"name": n, "status": "ok"} for n in ("implementation", "cso")]
+open(sys.argv[1], "w").write("".join(json.dumps(e) + "\n" for e in lines))
+PY2
+review s13nolattice --delta
+want "$TMP/s13nolattice.out" DELTA_REASON prior_reduced_coverage "a schema-13 review that had a lattice context but no lattice pass"
+restore
+python3 - "$INDEX" <<'PY2'
+import json, sys
+lines = [json.loads(l) for l in open(sys.argv[1])]
+for e in lines:
+    e["schema"] = 10
+    for k in ("lattice_context", "army_requested"):
+        e.pop(k, None)
+open(sys.argv[1], "w").write("".join(json.dumps(e) + "\n" for e in lines))
+PY2
 
 cp "$IDX_DIR/findings.tsv" "$TMP/findings.bak"
 printf 'bucket\tseverity\tlocation\tsources\tfinding\n' > "$IDX_DIR/findings.tsv"

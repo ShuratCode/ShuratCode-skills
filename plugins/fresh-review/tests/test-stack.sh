@@ -92,8 +92,8 @@ G -C "$WT" config --local "url.$ORIGIN.insteadOf" "git@github.com:acme/widgets.g
 echo ".fresh-review/" > "$WT/.gitignore"
 G -C "$WT" add .gitignore && G -C "$WT" commit -q -m ignore
 
-stack() { # label refs
-  (cd "$WT" && bash "$SCRIPTS/fr-preflight.sh" --stack "$2" > "$TMP/$1.pf" 2>&1)
+stack() { # label refs [preflight flags...]
+  (cd "$WT" && bash "$SCRIPTS/fr-preflight.sh" --stack "$2" "${@:3}" > "$TMP/$1.pf" 2>&1)
   local rd; rd="$(key "$TMP/$1.pf" RUN_DIR)"
   echo "$rd" > "$TMP/$1.rd"
   (cd "$WT" && bash "$SCRIPTS/fr-stack.sh" "$rd" > "$TMP/$1.out" 2>"$TMP/$1.err")
@@ -123,6 +123,13 @@ H1="$RD/handoff/unit-1.md"
 [ "$(head -1 "$RD/handoff/unit-1-rereview.md")" = "/fresh-review:review --pr 42 --since-pr 41 --delta" ] \
   && ok "a unit's re-review handoff adds --delta" \
   || bad "unit 1 re-review invocation" "--pr 42 --since-pr 41 --delta" "$(head -1 "$RD/handoff/unit-1-rereview.md")"
+stack flags 43 --codex --army --understood
+FRD="$(cat "$TMP/flags.rd")"
+[ "$(head -1 "$FRD/handoff/unit-2.md")" = "/fresh-review:review --pr 43 --codex --army" ] \
+  && ok "--codex and --army carry over to every handoff" \
+  || bad "flag carry-over" "--pr 43 --codex --army" "$(head -1 "$FRD/handoff/unit-2.md")"
+grep -q -- "--understood" "$FRD"/handoff/*.md \
+  && bad "--understood never carries over" "absent" "found" || ok "--understood never carries over"
 grep -q "SECRET TITLE" "$RD"/handoff/*.md \
   && bad "handoffs carry no PR titles" "no title" "title found" \
   || ok "handoffs carry no PR titles"

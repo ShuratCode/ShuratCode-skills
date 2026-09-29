@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.23.0 — 2026-09-29
+
+### `fresh-review` 0.14.0 → 0.15.0: understand the change first, then a leaner review
+
+The vi-hub run log (69 runs) showed a median run of 24 minutes. gstack's `/review` army took a median
+14 minutes (max 35), lattice 5.5 (max 28), and `/plan-eng-review` 6. Triage put ~7 findings per run in
+"real bug", and 633 findings in by-design, noise, or misread. Every blocker came back as a re-review, so
+PRs went through several loops. The explanation of the change was a flow diagram and one paragraph,
+and the stop asked "approve or reject".
+
+- **The understanding gate replaces the architecture gate.** One isolated pass (Pass U) explains the
+  change from the code alone: what the user sees or what the system does now compared with before,
+  how it fits the existing system, a UML diagram (class diagram for new components or classes,
+  sequence diagram for a rerouted flow), and the alternatives. Then a short discussion, and one or two
+  open questions. The user answers in their own words and the skill judges the answer against the
+  key points. "Yes, I understand" is not an answer. `--understood` skips the check (`--arch-approved`
+  still works). Trivial changes, and a re-review with no new parts, skip the questions.
+- **`/plan-eng-review` (Pass E) and the narrative pass (Pass N) are gone.** Pass U does both jobs.
+- **A new implementation pass (Pass I).** A direct read, no nested skill: correctness, contracts,
+  migrations, performance, and readability of the changed lines.
+- **Lattice runs only when the feature has a lattice context.** `fr-lattice-detect.sh` matches a doc
+  under `.lattice/{contexts,context,requirements,designs}` by its `branch:` frontmatter, by the changed
+  files it names, or by the diff touching it.
+- **The review army is opt-in.** Pass R runs in pr-remote only with `--army`. It carries over to stack
+  handoffs like `--codex`.
+- **Every finding shows its code.** Passes return a `diff` block under each finding (at most 12 lines),
+  and chat prints it under each blocker and should-fix finding.
+- **Comments to drop.** `fr-comments.sh` lists every comment and docstring the diff adds, leaving out
+  tool directives (`noqa`, `type: ignore`, `eslint-disable`, license headers, shebangs).
+- **A blocker needs a failure.** Bucket 1 now needs a stated failure (input or state → wrong result)
+  that triage checked. A real cost with no failure goes to a new bucket 5, SHOULD FIX, which does not
+  block. On a re-review, a finding in code the last review already saw is at most SHOULD FIX. Passes
+  report at most 10 findings. Noise and misread findings are one count line in chat.
+- **Token rule.** The orchestrator never opens a rendered PNG and never re-reads SKILL.md. Past runs
+  spent 370k tokens on those two.
+- **Run directories no longer collide.** Two runs that started in the same second shared one run
+  directory, so one run could read the other's `delta/` files. Preflight now adds a `-<n>` suffix.
+
+Run-log schema bumped to `schema:13` (`lattice_context`, `army_requested`, `comments`,
+`triage.should_fix`, gate values `waived` and `trivial`, and the `understanding` and `implementation`
+passes). `fr-delta.sh` counts coverage from the passes a schema-13 run should have had.
+`tests/test-comments.sh` and `tests/test-lattice-detect.sh` are new. `tests/test-arch-gate.sh` covers
+the new gate values and flags, and `tests/test-stack.sh` covers `--army` carry-over.
+
 ## 0.22.0 — 2026-09-24
 
 ### `fresh-review` 0.13.0 → 0.14.0: `--delta` no longer falls back to a full review in silence

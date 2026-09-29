@@ -49,7 +49,7 @@ Every cut below is conditioned on `tier2` **and** `FR_STATUS: clean`. A `status:
 | Codex structured review (`sections/adversarial.md`, 200+ lines) | fresh-review Pass C — literally the same `codex review` at `model_reasoning_effort="high"`. Cutting it also removes a 5-minute blocking call and an `AskUserQuestion` P1 gate from the ship path. | tier2 + clean **and `codex` in `FR_PASSES`** |
 | Codex adversarial `codex exec` (Step 11) | fresh-review Pass C, different framing — adversarial prose vs structured findings. Genuinely a second angle, so it only goes when the tree is provably identical. | tier2 + clean **and `codex` in `FR_PASSES`** |
 
-Codex is opt-in in fresh-review (its `--codex` flag), so a fresh-review run that did not request it lists only `lattice,cso` in `FR_PASSES`. On such a run **neither Codex cut fires** — ship runs its own structured and adversarial Codex passes, exactly as if there had been no prior review of them. The `CUT_CODEX_*` lines from `fr-ship-gate.sh` already fold this in; act on those lines, never on the tier alone.
+Codex is opt-in in fresh-review (its `--codex` flag), so a fresh-review run that did not request it lists only `implementation,cso` in `FR_PASSES` — plus `lattice` when the feature had a lattice context. With no `lattice`, `CUT_TESTING` and `CUT_MAINTAINABILITY` stay `no` and ship keeps both specialists. On such a run **neither Codex cut fires** — ship runs its own structured and adversarial Codex passes, exactly as if there had been no prior review of them. The `CUT_CODEX_*` lines from `fr-ship-gate.sh` already fold this in; act on those lines, never on the tier alone.
 
 Everything else runs. In particular:
 
