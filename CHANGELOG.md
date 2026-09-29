@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.23.1 — 2026-09-29
+
+### `fresh-review` 0.15.0 → 0.15.1: the review reads like a chat reply
+
+The review output was not consistent. Some runs printed the whole review in one code block, others
+printed normal text, because Step 8 showed the report shape as a fixed-width block.
+
+- **The review is a normal chat reply.** A short verdict sentence, then bullets with bold labels, in
+  full short sentences. Only the `diff` blocks are code blocks.
+- **Every `file:line` is a link.** In pr-remote the link points to the file under `SOURCE_ROOT`.
+- **The same rule covers the change explanation (Step 4.8b) and the Codex addendum.** The `mermaid`
+  fallback and the stack handoffs stay in code blocks, since they are code to copy.
+
 ## 0.23.0 — 2026-09-29
 
 ### `fresh-review` 0.14.0 → 0.15.0: understand the change first, then a leaner review

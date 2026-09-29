@@ -224,7 +224,7 @@ The reverse redundancy — ship re-running what *this* skill already did — is 
 
 Two audiences, two artifacts. Do not confuse them.
 
-- **Chat is for the human, and it is kept lean.** First the explanation of the change and the understanding check (Step 4.8). After the review: the verdict on its own line, then the blockers and should-fix findings, **each with the code it wants to change as a `diff` block**, then the comments to drop, then one line per by-design finding. Noise and misread findings are counted in one line; their detail is in `report.md`. It is never a pointer to a file in place of the findings.
+- **Chat is for the human, and it is kept lean.** First the explanation of the change and the understanding check (Step 4.8). After the review: the verdict on its own line, then the blockers and should-fix findings, **each with the code it wants to change as a `diff` block**, then the comments to drop, then one line per by-design finding. Noise and misread findings are counted in one line; their detail is in `report.md`. It is never a pointer to a file in place of the findings. Chat reads like a normal reply to a person: short sentences, bullets with bold labels, links. **Only code goes in a code block** (the `diff` blocks, a `mermaid` fallback, a stack handoff to copy). Every file reference is a link.
 - **Disk carries the long form.** The full Pass U report, the risk rationale and factors, the pass inventory, the noise and misread findings, the UI-preview note, the coverage notes, raw pass reports, the diff packet, and the run log all live in the run directory (`report.md` and `raw/`).
 - **Nothing is for GitHub.** No mode posts, comments, or edits a PR. See "What this skill does NOT do".
 
@@ -639,29 +639,30 @@ Then branch:
 
 #### 4.8b: Show the change
 
-Print the block in this shape:
+Write it as a normal chat reply in this shape. The fence only shows the shape — do not print it:
 
-````
-WHAT THIS CHANGE DOES — <branch, or PR #<n>: <title>>
+````text
+**What this change does** (<branch, or PR #<n>: <title>>)
 
 <BEHAVIOR, verbatim>
 
-How it fits
+**How it fits**
 - <FITS_INTO lines>
 
-New parts                                  (only when NEW_PARTS is not none)
-- P1. <part>  (<evidence files>)
+**New parts**   (only when NEW_PARTS is not none)
+- **P1. <part>** (<evidence file links>)
 
 <the rendered diagram — see below>
 
-Alternatives                               (only when ALTERNATIVES is not none)
-- <alternative> — <trade-off>
+**Alternatives**   (only when ALTERNATIVES is not none)
+- **<alternative>:** <trade-off>
 
-⚠ the PR title says <x>; the code says <y>.   (only when they disagree)
+⚠ The PR title says <x>; the code says <y>.   (only when they disagree)
 ````
 
 Rules:
 
+- **No code block around the explanation.** It is normal chat text. The only code block it may hold is the ` ```mermaid ` fallback below. File paths are links, as in Step 8.
 - **Print Pass U's text verbatim.** Do not rewrite, "improve", or merge it with what you know. You hold the producer context; Pass U does not, and that is the point.
 - **Render the diagram, do not print its source.** Write the DIAGRAM field's Mermaid source (without the fence) to `$RUN_DIR/ui/change.mmd`, render it, and send it:
 
@@ -671,8 +672,8 @@ Rules:
 
   On success, `SendUserFile` the PNG. **Never open the PNG with Read** — an image costs ~40k tokens in your context, and you do not need to see it. When `mmdc` is missing or errors, print the ` ```mermaid ` fence instead — one or the other, never both. Do not hand-fix invalid Mermaid; a diagram you drew carries your knowledge of the intent.
 - **Alternatives the author named.** When `PR_CONTEXT: present` and `pr-context/body.md` names alternatives the author considered, or (on your own branch) this session discussed alternatives, add them under `Alternatives the author named`, labeled as such. This is for the human only — it never reaches a pass.
-- **The PR title line** is the highest-value line of an explanation. When BEHAVIOR and the PR title disagree, print `⚠ the PR title says <x>; the code says <y>.` State both; do not editorialize. On a re-review, never print it: the title describes the whole PR and the explanation only the delta.
-- **On a re-review** the heading is `WHAT CHANGED SINCE THE LAST REVIEW — PR #<n>: <title>`.
+- **The PR title line** is the highest-value line of an explanation. When BEHAVIOR and the PR title disagree, print `⚠ The PR title says <x>; the code says <y>.` State both; do not editorialize. On a re-review, never print it: the title describes the whole PR and the explanation only the delta.
+- **On a re-review** the label is `**What changed since the last review** (PR #<n>: <title>)`.
 
 #### 4.8c: Check that the user understands
 
@@ -1107,7 +1108,7 @@ Four overrides:
 - **Bucket 2 may not cite a session decision** — there were none; the author is someone else. It admits only a standard, a config, a code path you can point at in `SOURCE_ROOT`, or a decision explicitly recorded in the PR discussion (`pr-context/discussion.md`) — the maintainer's own words in the thread, quoted. "The author presumably meant to…" is bucket 1. This is stricter than the normal rule, not looser: the usual escape hatch was legitimate only because the producer actually held the intent, and here the only intent you may cite is one someone actually wrote down on the PR.
 - **Bucket 4 requires that you opened the file.** Claiming a reviewer misread code you have not read yourself, in a change you did not write, is a guess. Without the read, it stays in bucket 1.
 - **The verdict vocabulary is `APPROVE` / `APPROVE-WITH-COMMENTS` / `REQUEST-CHANGES`.** Bucket 1 non-empty means `REQUEST-CHANGES`.
-- Findings are **comments, not fixes.** Phrase the `→ fix:` line as what you would ask for, and never edit the PR's code.
+- Findings are **comments, not fixes.** Phrase the **Fix:** line as an **Ask:** — what you would ask for, and never edit the PR's code.
 
 **The verdict** follows the buckets: bucket 1 non-empty → `DO-NOT-COMMIT` (pr-remote: `REQUEST-CHANGES`); otherwise bucket 5 non-empty, or comments to drop → `COMMIT-WITH-FIXES` (pr-remote: `APPROVE-WITH-COMMENTS`); otherwise `COMMIT` (pr-remote: `APPROVE`).
 
@@ -1115,72 +1116,79 @@ Write the triaged findings to `$RUN_DIR/findings.tsv` for the log: tab-separated
 
 ### Step 8: Report to chat
 
-**This is the primary output.** The explanation of the change was already shown at the gate (Step 4.8b); do not print it again. Print the review block, verdict first:
+**This is the primary output.** The explanation of the change was already shown at the gate (Step 4.8b); do not print it again. Write the review as a normal chat reply, the way you would answer a person: a short verdict sentence, then bullets with a bold label, in full short sentences. It is not a report form, a log dump, or a table. The fence below only shows the shape — do not print it:
 
-````
-FRESH REVIEW — <COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT>
-                 (pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES)
-<branch, or PR #<n> @ <short sha>> · <N> files, +<a>/−<b> · risk: <low|med|high> · <elapsed>
-understanding: <checked (<n> questions) | waived | trivial change | carried from the last review | skipped (--understood) | did not run>
-passes: <implementation, cso[, lattice][, codex][, review][, static-analysis][, fix-check]>
-re-review: changes since <short PRIOR_HEAD> (last verdict <PRIOR_VERDICT>) · earlier blockers: <total> — <fixed> fixed, <open> still open   (only when DELTA: applied)
-static analysis (<tool>): <total> raised — <fixed> fixed, <suppressed> suppressed, <dismissed> dismissed, <unaddressed> unaddressed   (only when Pass W ran)
-⚠ reduced coverage: <what was missing>                               (only when a pass failed / was unavailable)
+````text
+**<COMMIT | COMMIT-WITH-FIXES | DO-NOT-COMMIT; pr-remote: APPROVE | APPROVE-WITH-COMMENTS | REQUEST-CHANGES>.** <one sentence: how many blockers and should-fix findings>
 
-BLOCKERS — fix before commit (<n>)
-1. <file>:<line>  [<sources>]  <problem, with the failure>
-   → fix: <one sentence>
+- **Scope:** <branch, or PR #<n> at <short sha>>, <N> files, +<a>/−<b>. Risk: <low|med|high>. Took <elapsed>.
+- **Understanding:** <checked with <n> questions | waived | trivial change | carried from the last review | skipped (--understood) | did not run>.
+- **Passes:** <implementation, cso[, lattice][, codex][, review][, static-analysis][, fix-check]>.
+- **Re-review:** only the changes since <short PRIOR_HEAD> (last verdict <PRIOR_VERDICT>). Earlier blockers: <total> — <fixed> fixed, <open> still open.   (only when DELTA: applied)
+- **Static analysis (<tool>):** <total> raised — <fixed> fixed, <suppressed> suppressed, <dismissed> dismissed, <unaddressed> unaddressed.   (only when Pass W ran)
+- **⚠ Reduced coverage:** <what was missing>.   (only when a pass failed / was unavailable)
+
+**Blockers — fix before commit (<n>)**
+
+1. [<file>:<line>](<link>) (<sources>). <The problem and its failure, in short sentences.>
+   **Fix:** <one sentence>
+
    ```diff
    - <current>
    + <proposed>
    ```
 
-SHOULD FIX — does not block (<n>)
-1. <file>:<line>  [<sources>]  <problem>
+**Should fix — does not block (<n>)**
+
+1. [<file>:<line>](<link>) (<sources>). <The problem, in short sentences.>
+
    ```diff
    ...
    ```
 
-COMMENTS TO DROP (<n> blocks, <m> lines)
-  <file>:<start>[-<end>]  <text>
-  <file>:<start>-<end>    docstring (<k> lines)
+**Comments to drop (<n> blocks, <m> lines)**
 
-BY DESIGN (<n>)
-  <file>:<line>  [<sources>]  <finding> — <the decision or standard that justifies it>
+- [<file>](<link>): lines <start>[-<end>] (<what>), <start>-<end> (docstring, <k> lines), …
 
-set aside: <n> noise, <n> misread — in report.md
-log: <RUN_DIR>
+**By design (<n>)**
+
+- [<file>:<line>](<link>) (<sources>). <The finding.> By design because <the decision or standard that justifies it>.
+
+Set aside <n> noise and <n> misread findings; they are in `report.md`. The run log is in `<RUN_DIR>`.
 ````
 
 Rules:
 
+- **Only code goes in a code block.** The ` ```diff ` blocks are the only code blocks in the review. The verdict, the scope bullets, the section labels, the findings, the comment list, and the by-design lines are normal chat text. Never wrap them, or the whole review, in a code block, and never lay them out as fixed-width columns. Names from the code (`concat_ws`, `kind = DATA_CHECK`) go in inline backticks.
+- **Every `<file>:<line>` is a link.** Link to the file relative to the working directory, with `:<line>` in the target (`[pipeline.py:304](src/pipeline.py:304)`). In pr-remote the file lives under `SOURCE_ROOT`: link to its absolute path there.
 - The verdict is the first line. Never bury it under a preamble.
-- **Every blocker and should-fix finding shows its ` ```diff ` block** from the pass that raised it, when it has one. Copy it as the pass wrote it — do not rewrite it. When a pass gave no block and the fix is code, open the file from `SOURCE_ROOT` at that line (`sed -n '<l-2>,<l+2>p'`), and print the current lines as `-` lines under the finding, so the reader at least sees the code in question.
-- **COMMENTS TO DROP** prints `packet/comments.tsv`, one line per block, grouped by file. A docstring prints as `docstring (<k> lines)`. More than 30 blocks → print the first 30 and `+<n> more in report.md`. In pr-remote, head it `COMMENTS TO DROP — ask the author`. Omit the section when `COMMENT_BLOCKS: 0`.
+- **Every blocker and should-fix finding shows its ` ```diff ` block** from the pass that raised it, when it has one. Copy it as the pass wrote it — do not rewrite it. When a pass gave no block and the fix is code, open the file from `SOURCE_ROOT` at that line (`sed -n '<l-2>,<l+2>p'`), and print the current lines as `-` lines in a ` ```diff ` block under the finding, so the reader at least sees the code in question.
+- **Comments to drop** prints `packet/comments.tsv` as one bullet per file: the file link, then its blocks as line ranges with a few words each. A docstring prints as `docstring (<k> lines)`. More than 30 blocks → print the first 30 and `+<n> more in report.md`. In pr-remote, head it `Comments to drop — ask the author`. Omit the section when `COMMENT_BLOCKS: 0`.
 - **NOISE and MISREAD are one count line in chat**, with every finding in `report.md`. BY DESIGN stays in chat, one line each: an uncited "by design" is the thing most worth seeing.
-- The context line carries `risk:` — **Pass K's class** (`low`/`med`/`high`) in `pr` mode, the mechanical `RISK` (`normal`/`HIGH`) in `review` mode. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical)`.
-- For a stack unit the context line names every PR in it and the unit: `PRs #42–#43 @ <short sha> · stack unit 1 of 3`. **The last line of the whole chat output is the stack report** from the handoff, filled in with the verdict and the blocker count: `STACK REPORT — <stack id> · unit 1/3 · PRs #42, #43 · REQUEST-CHANGES · blockers 2`. It is for the user to paste back to the orchestrator, so print it exactly in that shape. When the run stopped at the understanding check, the verdict there is `ARCH-PENDING`.
-- In pr-remote mode the context line names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ PR was updated during this review` on drift, and `⚠ PR state: MERGED` (or `CLOSED`) when it is not open.
-- **The `re-review` line prints only when `DELTA: applied`.** The blocker counts come from Pass F; with no earlier blockers, print `earlier blockers: 0`. Its `<open>` count is the number of `fix-check` lines still in BLOCKERS after triage; a released one counts as fixed.
-- **The `static analysis` line prints only when Pass W ran.** Its `<unaddressed>` count equals the number of Pass W blockers below.
-- **The `⚠ reduced coverage` line prints only when the run actually lost a lens** — a pass that should have run failed, `HAS_GSTACK: 0` (no `/cso`), a requested or required Codex could not run, `--army` was asked for and Pass R could not run, Pass F failed (`earlier blockers not checked`), Pass U failed (`understanding check did not run`), or the user accepted a delta after a reduced or pruned last review (Step 1.6). On a high-risk run without Codex, say it plainly: `⚠ reduced coverage: Codex is required for high-risk changes and did not run (<reason>) — fix with codex login, then re-run`. A pass absent by choice — lattice with no lattice context, the army without `--army`, Codex not requested — is not reduced coverage. On a clean run, omit the line.
-- In pr-remote, blockers are phrased as `→ ask:` (comments, not fixes).
-- `[<sources>]` is the merged source list (`implementation`, `lattice`, `cso`, `review`, `codex`, `static-analysis`, `fix-check`) — this is how the user sees which passes converged.
-- A section with zero findings is omitted, except BLOCKERS, which prints `BLOCKERS (0)`.
+- The **Scope** bullet carries the risk — **Pass K's class** (`low`/`med`/`high`) in `pr` mode, the mechanical `RISK` (`normal`/`HIGH`) in `review` mode. If Pass K was requested but failed, fall back to the mechanical class and add ` (mechanical)`.
+- For a stack unit the **Scope** bullet names every PR in it and the unit: `PRs #42–#43 at <short sha>, stack unit 1 of 3`. **The last line of the whole chat output is the stack report** from the handoff, filled in with the verdict and the blocker count: `STACK REPORT — <stack id> · unit 1/3 · PRs #42, #43 · REQUEST-CHANGES · blockers 2`. It is for the user to paste back to the orchestrator, so print it exactly in that shape. When the run stopped at the understanding check, the verdict there is `ARCH-PENDING`.
+- In pr-remote mode the **Scope** bullet names the **PR and the commit reviewed**, not your branch — and it names `PR_HEAD`, which on `HEAD_DRIFT: yes` is not what `gh` reported. Add `⚠ The PR was updated during this review.` on drift, and `⚠ The PR is MERGED` (or `CLOSED`) when it is not open.
+- **The Re-review bullet prints only when `DELTA: applied`.** The blocker counts come from Pass F; with no earlier blockers, print `earlier blockers: 0`. Its `<open>` count is the number of `fix-check` lines still in Blockers after triage; a released one counts as fixed.
+- **The Static analysis bullet prints only when Pass W ran.** Its `<unaddressed>` count equals the number of Pass W blockers below.
+- **The ⚠ Reduced coverage bullet prints only when the run actually lost a lens** — a pass that should have run failed, `HAS_GSTACK: 0` (no `/cso`), a requested or required Codex could not run, `--army` was asked for and Pass R could not run, Pass F failed (`earlier blockers not checked`), Pass U failed (`understanding check did not run`), or the user accepted a delta after a reduced or pruned last review (Step 1.6). On a high-risk run without Codex, say it plainly: `Codex is required for high-risk changes and did not run (<reason>). Run codex login, then re-run.` A pass absent by choice — lattice with no lattice context, the army without `--army`, Codex not requested — is not reduced coverage. On a clean run, omit the bullet.
+- In pr-remote, blockers are phrased as **Ask:** instead of **Fix:** (comments, not fixes).
+- `(<sources>)` is the merged source list (`implementation`, `lattice`, `cso`, `review`, `codex`, `static-analysis`, `fix-check`) — this is how the user sees which passes converged.
+- A section with zero findings is omitted. Blockers is never omitted: with none, the verdict sentence says `No blockers.`
 
-**When the run stopped at the understanding check** (the user stopped it, or the session ended): print `FRESH REVIEW — UNDERSTANDING PENDING`, then `implementation not reviewed`, then `To continue: re-run the review, or add --understood to skip the check.` No buckets — nothing was reviewed.
+**When the run stopped at the understanding check** (the user stopped it, or the session ended): say: `**Understanding pending.** The implementation was not reviewed. To continue, re-run the review, or add --understood to skip the check.` No buckets — nothing was reviewed.
 
 ### Step 8.5: Codex addendum (only when Codex landed late)
 
 **Only reachable when Codex was launched with `CODEX_REASON: asked` on a normal-risk run.** A Codex-off run has no background task, and a high-risk run waits for Codex before the verdict, so neither enters this step.
 
-When the background task reports completion after Step 8 has printed, compact it (Step 6) and post a short addendum — not a re-print of the whole review:
+When the background task reports completion after Step 8 has printed, compact it (Step 6) and post a short addendum — not a re-print of the whole review. Write it as a normal chat reply, with the Step 8 rules (only diffs in code blocks, file links):
 
-```
-CODEX ADDENDUM (finished <duration>, after the verdict)
-verdict impact: <unchanged | now COMMIT-WITH-FIXES | now DO-NOT-COMMIT>
-new blockers: <n>   corroborates existing: <n>   noise: <n>
-<blocker lines, if any>
+```text
+**Codex finished** (<duration>, after the verdict). <Verdict unchanged. | The verdict is now COMMIT-WITH-FIXES. | The verdict is now DO-NOT-COMMIT.>
+
+- **New blockers:** <n>. **Agrees with earlier findings:** <n>. **Noise:** <n>.
+
+<blocker items, if any, in the Step 8 shape>
 ```
 
 Then update `$RUN_DIR/report.md` and set `codex.changed_verdict` in the run log. That field is what eventually answers "is Codex worth keeping" with evidence instead of a guess.
