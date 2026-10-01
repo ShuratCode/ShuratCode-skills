@@ -1,10 +1,11 @@
 ---
 name: fresh-review
 description: |
-  Understand-first, fresh-eyes code review. Every run starts by explaining the change: what the user
-  sees or what the system now does differently, how it fits the existing system, a UML diagram when
-  it adds components or classes, and the alternatives. Then it checks, with an open question, that
-  the user really understands the change — not a yes/no approval. Only after that does it review the
+  Understand-first, fresh-eyes code review. Every run starts by explaining the change at a high
+  level, as if to someone new to the project: what this part of the system is, what the user sees or
+  what the system now does differently, how it fits, a UML class diagram and a sequence diagram, and
+  the alternatives. Then it checks, with an open question, that the user knows what the change is —
+  not a yes/no approval, and not a hunt for bugs. Only after that does it review the
   implementation, via context-isolated subagents that cannot read design docs, intent, or prior
   session context: a fast implementation pass and the gstack security audit always, the lattice
   review only when the feature has a lattice design or context doc. Every finding prints the code it
@@ -105,13 +106,16 @@ Everything downstream keys off `CODEX_REQUESTED` from `state.env`: Step 5 launch
 
 **Every mode explains the change before it reviews it.** Step 4.8 runs before any other reviewer. One isolated pass (Pass U) reads the diff and writes:
 
-1. **What changes** — a short paragraph: what the user sees, or what the system does, compared with before.
-2. **How it fits** — where the change sits in the existing system: what calls it, what it calls, which flow it joins.
-3. **A UML diagram** — a class diagram when the change adds or changes components or classes; a sequence diagram when it only reroutes a flow; none for a small local change.
-4. **Alternatives** — other ways to build it, and what each would trade. None when there is no real choice.
-5. **Check questions** — one or two open questions about the change, with the key points a right answer holds.
+1. **The system in brief** — two or three sentences for a reader who is new to the project: what this part of the system is and what it is for.
+2. **What changes** — a short paragraph: what the user sees, or what the system does, compared with before.
+3. **How it fits** — where the change sits in the existing system, in the big blocks only: which part starts it, which parts it talks to.
+4. **Two UML diagrams** — a class diagram of the main parts and how they connect, and a sequence diagram of the main flow, from trigger to outcome. Each is `none` only when it has nothing to show; both are `none` for a trivial change.
+5. **Alternatives** — other ways to build it, and what each would trade. None when there is no real choice.
+6. **Check questions** — one or two open questions about *what* the change is, with the key points a right answer holds.
 
-The skill prints 1–4, then has a short discussion with the user. The user may ask anything first. Then the skill asks the check questions. **This is not a yes/no question.** The user answers in their own words, and the skill judges the answer against the key points. When the answer holds them, the gate opens and the implementation review starts. When it misses a point, the skill explains that point and asks one follow-up. "Yes, I understand" is not an answer.
+The whole explanation is **high level**. It reads like the first briefing a new team member gets before a review: the big picture, the domain words, no internals. Edge cases, races, and implementation choices belong to the review, not to the explanation.
+
+The skill prints 1–5, then has a short discussion with the user. The user may ask anything first. Then the skill asks the check questions. **This is not a yes/no question, and it is not a quiz on bugs.** The questions check that the user knows what the change does, why, and where it sits — things the explanation itself says. They never ask the user to find a defect, a race, or an edge case; finding those is the review's job. The user answers in their own words, and the skill judges the answer against the key points. When the answer holds them, the gate opens and the implementation review starts. When it misses a point, the skill explains that point and asks one follow-up. "Yes, I understand" is not an answer.
 
 The reason is order. A reader who does not understand a change cannot judge findings about it, and the fan-out is the expensive part of a run. So it waits until the user knows what it reviews.
 
@@ -579,23 +583,33 @@ Three parts, in order: explain (Pass U), show, check.
 
 **Pass U is the first reviewer of the run, and it runs alone.** Launch it in its own message: one subagent, no other subagent, no Codex command, no Step 5 work. Its prompt is the Step 5 isolation contract, verbatim, followed by this task, which replaces the contract's return-format block:
 
-> Your job is not to find defects. Your job is to explain this change to the engineer who owns it, so they understand it before anyone reviews the code. Read `{{RUN_DIR}}/packet/ddd.md` first — the repo's domain vocabulary — then `diff.patch`. Open a source file from `{{SOURCE_ROOT}}` only to learn what an existing thing is, or who calls it.
+> Your job is not to find defects. Your job is to explain this change at a high level, so the reader knows what it is before anyone reviews the code. Write for an engineer who is new to this project and is asked to review this change on their first day: they know how to code, but they do not know this system, its names, or its history. Give them the big picture, not the internals. Read `{{RUN_DIR}}/packet/ddd.md` first — the repo's domain vocabulary — then `diff.patch`. Open a source file from `{{SOURCE_ROOT}}` only to learn what an existing thing is, or who calls it.
 >
 > When `scope.txt` has `DELTA=since-last-review`, "this change" means only the diff: what changed since the last review.
 >
-> Write five things:
+> **High level everywhere.** Use plain domain words. No function names, variable names, file paths, flags, table names, or library internals in the text fields. No edge cases, races, error codes, or tuning values — those are the review's job. If a sentence only makes sense to someone who has read the code, cut it. No empty verbs: "refactored", "updated", "improved", "cleaned up" say nothing.
 >
-> 1. **BEHAVIOR** — one short paragraph, at most five sentences. What does the user see, or what does the system do now, that it did not do before? Say *before* and *now*. Name the trigger (a request, a job, a command) and the outcome. No file paths, no function names — use the domain words. No empty verbs: "refactored", "updated", "improved", "cleaned up" say nothing. If the change has no behavior change (tooling, docs, formatting, a version bump, a config value), say exactly that and set `CHANGE_KIND: trivial`.
-> 2. **FITS_INTO** — at most four lines. Where the change sits in the existing system: which existing components call the new or changed code, what it calls, and which flow it joins. Name real existing components you saw.
-> 3. **NEW_PARTS** — each new or changed component, class, contract (API, event, schema, file format, CLI), data owner, or cross-cutting mechanism (cache, retry, concurrency, auth, config loading). Name the file that shows it. A new function inside an existing module that follows that module's pattern is not a new part. When `{{RUN_DIR}}/delta/prior-architecture.md` exists, read it — the only file under `{{RUN_DIR}}/delta/` you may read — and mark each part `seen: <the earlier part>` when it is the same structural choice as one there, and `new` otherwise. When unsure, `new`.
-> 4. **DIAGRAM** — one Mermaid UML diagram, or `none`:
->    - `classDiagram` when NEW_PARTS has components or classes. Show the new and changed classes with their key fields and methods (at most five members each), and the existing classes they connect to, with their relations (`<|--` inherits, `*--` owns, `-->` uses, `..>` depends). Mark new classes with `<<new>>` and changed ones with `<<changed>>`. At most ~12 classes.
->    - `sequenceDiagram` when there are no new parts but the change reroutes a flow: who calls whom, in what order. Mark the new or changed steps with a `Note over`.
->    - `none` for a small local change. Do not invent a diagram.
->    - Keep it valid Mermaid — it will be rendered. Quote any label with punctuation. No HTML.
-> 5. **ALTERNATIVES** — at most three other ways to build this change, each with what it would trade (simpler, faster, safer, more coupling, more code). Only real options for this code, judged from the code alone. `none` when there is no real choice. Do not state what the author intended — you have not been shown it.
+> Write six things:
 >
-> Then write **CHECK** — questions that show whether the reader understands the change. One question for a small change, two for a change with new parts. Each question asks *why* or *what happens when* — the behavior, the new part's role, a failure case — never a name, a file, or a line number. After each, list the two or three key points a right answer must hold. The reader will not see the key points.
+> 1. **SYSTEM** — two or three sentences. What is this part of the project, what is it for, and who or what uses it? Describe the area the change lives in as it was before the change, so a newcomer has a frame for the rest.
+> 2. **BEHAVIOR** — one short paragraph, at most four sentences. What does the user see, or what does the system do now, that it did not do before? Say *before* and *now*. Name the trigger (a request, a job, a command) and the outcome. If the change has no behavior change (tooling, docs, formatting, a version bump, a config value), say exactly that and set `CHANGE_KIND: trivial`.
+> 3. **FITS_INTO** — at most three lines. Where the change sits in the existing system, in big blocks only (a service, a job, a page, a store): which block starts it, which blocks it talks to, and which flow it joins. Name real existing blocks you saw.
+> 4. **NEW_PARTS** — each new or changed component, class, contract (API, event, schema, file format, CLI), data owner, or cross-cutting mechanism (cache, retry, concurrency, auth, config loading). Describe each in one plain sentence — its role, not how it works. Name the file that shows it in `evidence`. A new function inside an existing module that follows that module's pattern is not a new part. When `{{RUN_DIR}}/delta/prior-architecture.md` exists, read it — the only file under `{{RUN_DIR}}/delta/` you may read — and mark each part `seen: <the earlier part>` when it is the same structural choice as one there, and `new` otherwise. When unsure, `new`.
+> 5. **Two diagrams**, both Mermaid UML, both high level. Keep each valid Mermaid — it will be rendered. Quote any label with punctuation. No HTML.
+>    - **CLASS_DIAGRAM** — a `classDiagram` of the main parts and how they connect: the new and changed components or classes, and the existing ones they connect to, with their relations (`<|--` inherits, `*--` owns, `-->` uses, `..>` depends). Show at most three key members each, only the ones that explain the role. Mark new parts with `<<new>>` and changed ones with `<<changed>>`. At most ~8 boxes. `none` only when the change adds or changes no component or class.
+>    - **SEQUENCE_DIAGRAM** — a `sequenceDiagram` of the main flow, from the trigger to the outcome. The participants are big blocks (the user, a service, a job, a database, an outside system), not functions. At most ~6 participants and ~10 messages; show the happy path only. Mark the new or changed steps with a `Note over`. `none` only when the change has no flow to show.
+>    - Both are `none` for a trivial change. Do not invent a diagram.
+> 6. **ALTERNATIVES** — at most three other ways to build this change, each with what it would trade (simpler, faster, safer, more coupling, more code), in one line each. Only real options for this code, judged from the code alone. `none` when there is no real choice. Do not state what the author intended — you have not been shown it.
+>
+> Then write **CHECK** — questions that show whether the reader knows *what* this change is. One question for a small change, two for a change with new parts. A reader who read your explanation once, with care, must be able to answer each one from it alone. Ask about:
+> - what the change does, in their own words, and what is different for the user or the system after it ships;
+> - what starts it and what comes out of it;
+> - the role of the main new part, and where it sits in the system;
+> - why the change is needed — the problem it solves.
+>
+> Never ask about edge cases, races, failure modes, error handling, performance, or why one implementation detail was picked over another. Those questions test whether the reader can find bugs, and finding bugs is the review's job, not the reader's. Never ask for a name, a file, or a line number. After each question, list the two or three key points a right answer must hold — each one stated in your SYSTEM, BEHAVIOR, FITS_INTO, or NEW_PARTS text. The reader will not see the key points.
+>
+> Good: *In your own words, what can an operator do after this change that they could not do before, and which part of the system now handles it?* Bad: *What happens when two runs start the same window at the same moment?*
 >
 > Write your full report to `{{RUN_DIR}}/raw/understanding.md`. Return *only* this block:
 >
@@ -603,6 +617,8 @@ Three parts, in order: explain (Pass U), show, check.
 > PASS: understanding
 > STATUS: ok | partial | failed
 > CHANGE_KIND: behavior | structure | trivial
+> ---
+> SYSTEM: <two or three sentences — this part of the project, for a newcomer>
 > ---
 > BEHAVIOR: <one short paragraph — before and now>
 > ---
@@ -613,7 +629,9 @@ Three parts, in order: explain (Pass U), show, check.
 > - P1: <the part in one sentence> | evidence: <file>[, <file>] | new | seen: <earlier part>
 > (or "none")
 > ---
-> DIAGRAM: <one fenced mermaid block (classDiagram or sequenceDiagram), fence and all — or "none">
+> CLASS_DIAGRAM: <one fenced mermaid classDiagram block, fence and all — or "none">
+> ---
+> SEQUENCE_DIAGRAM: <one fenced mermaid sequenceDiagram block, fence and all — or "none">
 > ---
 > ALTERNATIVES
 > - <another way> — <what it would trade>
@@ -642,6 +660,10 @@ Then branch:
 Write it as a normal chat reply in this shape. The fence only shows the shape — do not print it:
 
 ````text
+**The system in brief**
+
+<SYSTEM, verbatim>
+
 **What this change does** (<branch, or PR #<n>: <title>>)
 
 <BEHAVIOR, verbatim>
@@ -652,7 +674,11 @@ Write it as a normal chat reply in this shape. The fence only shows the shape �
 **New parts**   (only when NEW_PARTS is not none)
 - **P1. <part>** (<evidence file links>)
 
-<the rendered diagram — see below>
+**Main parts** (class diagram)   (only when CLASS_DIAGRAM is not none)
+<the rendered class diagram — see below>
+
+**Main flow** (sequence diagram)   (only when SEQUENCE_DIAGRAM is not none)
+<the rendered sequence diagram — see below>
 
 **Alternatives**   (only when ALTERNATIVES is not none)
 - **<alternative>:** <trade-off>
@@ -662,15 +688,18 @@ Write it as a normal chat reply in this shape. The fence only shows the shape �
 
 Rules:
 
-- **No code block around the explanation.** It is normal chat text. The only code block it may hold is the ` ```mermaid ` fallback below. File paths are links, as in Step 8.
+- **No code block around the explanation.** It is normal chat text. The only code blocks it may hold are the ` ```mermaid ` fallbacks below. File paths are links, as in Step 8.
 - **Print Pass U's text verbatim.** Do not rewrite, "improve", or merge it with what you know. You hold the producer context; Pass U does not, and that is the point.
-- **Render the diagram, do not print its source.** Write the DIAGRAM field's Mermaid source (without the fence) to `$RUN_DIR/ui/change.mmd`, render it, and send it:
+- **Render each diagram, do not print its source.** Write the CLASS_DIAGRAM source (without the fence) to `$RUN_DIR/ui/class.mmd` and the SEQUENCE_DIAGRAM source to `$RUN_DIR/ui/sequence.mmd` — skip a field that is `none` — and render each one that exists:
 
   ```bash
-  mkdir -p "$RUN_DIR/ui" && mmdc -i "$RUN_DIR/ui/change.mmd" -o "$RUN_DIR/ui/change.png"
+  mkdir -p "$RUN_DIR/ui"
+  for d in class sequence; do
+    [ -f "$RUN_DIR/ui/$d.mmd" ] && mmdc -i "$RUN_DIR/ui/$d.mmd" -o "$RUN_DIR/ui/$d.png"
+  done
   ```
 
-  On success, `SendUserFile` the PNG. **Never open the PNG with Read** — an image costs ~40k tokens in your context, and you do not need to see it. When `mmdc` is missing or errors, print the ` ```mermaid ` fence instead — one or the other, never both. Do not hand-fix invalid Mermaid; a diagram you drew carries your knowledge of the intent.
+  `SendUserFile` each PNG that rendered, under its heading, the class diagram first. **Never open a PNG with Read** — an image costs ~40k tokens in your context, and you do not need to see it. When `mmdc` is missing or one diagram errors, print that diagram's ` ```mermaid ` fence instead — one or the other per diagram, never both. Do not hand-fix invalid Mermaid; a diagram you drew carries your knowledge of the intent.
 - **Alternatives the author named.** When `PR_CONTEXT: present` and `pr-context/body.md` names alternatives the author considered, or (on your own branch) this session discussed alternatives, add them under `Alternatives the author named`, labeled as such. This is for the human only — it never reaches a pass.
 - **The PR title line** is the highest-value line of an explanation. When BEHAVIOR and the PR title disagree, print `⚠ The PR title says <x>; the code says <y>.` State both; do not editorialize. On a re-review, never print it: the title describes the whole PR and the explanation only the delta.
 - **On a re-review** the label is `**What changed since the last review** (PR #<n>: <title>)`.
@@ -717,7 +746,7 @@ When the user replies, handle it by what it is:
   echo "ARCH_GATE='approved'" >> "$RUN_DIR/state.env"
   ```
 
-  Any **partly** or **missed** → for each one, say what was right, then explain the missing point in two or three sentences, pointing at the new part or the diagram. Then ask **one** follow-up question on that point — not the same question again — and end your turn. Judge the reply the same way.
+  Any **partly** or **missed** → for each one, say what was right, then explain the missing point in two or three sentences, pointing at the new part or a diagram. Then ask **one** follow-up question on that point — not the same question again, and still about what the change is, never an edge case — and end your turn. Judge the reply the same way.
 - **After two follow-up rounds** still missing a point → explain the whole change in a short paragraph, then ask the user to sum up the change in one or two sentences. A summary that holds the missing key points opens the gate. Keep going this way; do not open the gate on a guess.
 - **"yes", "ok", "got it", "I understand"** with no content → `Tell me in your own words: <the question again>.`
 - **An explicit waiver** ("skip the check", "just review it", "I don't need the check") → record `ARCH_GATE='waived'`, say `Check skipped at your request.`, and go to Step 5. This is the user's call; never suggest it yourself.
@@ -1265,7 +1294,7 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
  "repo":"<repo>","branch":"<BRANCH>","base":"<BASE>",
  "mode":"<review|pr>","codex_requested":false,"codex_reason":"<none|asked|risk|risk-pass>",
  "army_requested":false,"lattice_context":false,
- "architecture":{"gate":"<approved|waived|trivial|carried|pending|skipped|failed>","decisions":0,"diagram":"<class|sequence|none>","questions":0,"rounds":0},
+ "architecture":{"gate":"<approved|waived|trivial|carried|pending|skipped|failed>","decisions":0,"diagram":"<both|class|sequence|none>","questions":0,"rounds":0},
  "comments":{"blocks":0,"lines":0},
  "pr":{"number":0,"url":"","state":"","head":"","drift":false},
  "stack":{"id":"<STACK_ID>","unit":1,"units":1,"prs":[0]},
@@ -1293,7 +1322,7 @@ Write `$RUN_DIR/report.md` — and because chat is now lean, this file is where 
  "tools":{"gstack":0,"codex":0,"gh":0}}
 ```
 
-- **Set `architecture` from Step 4.8.** It keeps its old name so old and new entries line up. `gate` is `skipped` under `--understood`, `failed` when Pass U failed, `trivial` for a trivial change, `carried` when the user understood the last review and the delta has no new parts, `waived` when the user waived the check, `approved` when the user's answer held the key points, and `pending` when the run stopped at the check. `decisions` is Pass U's NEW_PARTS count; `diagram` is the diagram kind shown; `questions` is how many check questions were asked; `rounds` is how many follow-up rounds it took (0 when the first answer held every key point). Omit the `understanding` pass when the gate was skipped. When the gate stayed `pending`, the implementation passes never launched — omit them, and set `verdict` to `ARCH-PENDING`.
+- **Set `architecture` from Step 4.8.** It keeps its old name so old and new entries line up. `gate` is `skipped` under `--understood`, `failed` when Pass U failed, `trivial` for a trivial change, `carried` when the user understood the last review and the delta has no new parts, `waived` when the user waived the check, `approved` when the user's answer held the key points, and `pending` when the run stopped at the check. `decisions` is Pass U's NEW_PARTS count; `diagram` is which diagrams were shown (`both` when the class and the sequence diagram were); `questions` is how many check questions were asked; `rounds` is how many follow-up rounds it took (0 when the first answer held every key point). Omit the `understanding` pass when the gate was skipped. When the gate stayed `pending`, the implementation passes never launched — omit them, and set `verdict` to `ARCH-PENDING`.
 - **Set `lattice_context` from Step 4.4, and `army_requested` from `ARMY_REQUESTED`.** Omit the `lattice` pass when `lattice_context` is false, and the `review` pass when `army_requested` is false or outside pr-remote — a pass that never launched is not a pass that failed. A later re-review reads these two keys to decide which lenses the run should have had.
 - **`comments`** is `COMMENT_BLOCKS` and `COMMENT_LINES` from Step 4.4.
 - **`triage.should_fix`** counts bucket 5.
@@ -1327,7 +1356,7 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - *Did the blocker bar stop the loops?* `triage.real_bug` per run, and how many re-reviews a PR needs, against the schema-12 runs (about seven blockers per run).
 - *Does the risk class track reality?* `risk_level` against the triage counts over many runs answers whether the pass is calibrated: `high`-risk runs should not be the ones with zero real bugs *and* zero caution, and a repo where every change comes back `low` has a pass that has stopped discriminating.
 
-**Schema history.** `schema:13` replaces the architecture gate with the understanding gate (the `architecture` object keeps its name and adds `questions` and `rounds`; new gate values `waived` and `trivial`; `rejected` and `not_needed` are gone), drops the `narrative` and `eng-review` passes (their jobs moved to the `understanding` pass), adds the `implementation` pass, makes `lattice` conditional on the new top-level `lattice_context` and `review` conditional on `army_requested`, and adds `comments` and `triage.should_fix` (bucket 5). Reading a `schema:12` entry, treat `lattice_context` and `army_requested` as true — both passes always ran then — and `should_fix` as 0. `schema:12` adds `plugin_version` (the version of the plugin copy that ran, which can lag the installed one in a desktop session), `delta.source` (`record` or `runs_index`: where the last review was found), the `carried` architecture gate, and three delta reasons, `prior_blockers_unknown` and — after the user chose the whole PR — `no_prior_review` and `prior_reduced_coverage` as a chosen full review. Reading a `schema:11` entry, treat `plugin_version` and `delta.source` as absent-unknown (the source was always the record), and read its `full` reasons as automatic. `schema:11` adds re-review: an optional `delta` object (present only when `--delta` was asked for) and an optional `fix-check` pass (Pass F). On a `schema:11` entry with `delta.applied:true`, `diff`, `triage`, and the findings cover only the changes since `delta.prior_head`. Reading a `schema:10` entry, treat `delta` as absent — every review covered the whole PR. `schema:10` adds stack mode: an orchestrator entry with `mode: "stack"`, `verdict: "HANDOFF"`, no passes, and a `stack` object holding the plan; and an optional `stack` object on each unit's review entry linking it back by `id`. Reading a `schema:9` entry, treat `stack` as absent — stack mode did not exist. `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
+**Schema history.** Within `schema:13`, from plugin 0.16.0, `architecture.diagram` can be `both` — Pass U now draws a class and a sequence diagram; earlier `schema:13` entries hold one kind at most. `schema:13` replaces the architecture gate with the understanding gate (the `architecture` object keeps its name and adds `questions` and `rounds`; new gate values `waived` and `trivial`; `rejected` and `not_needed` are gone), drops the `narrative` and `eng-review` passes (their jobs moved to the `understanding` pass), adds the `implementation` pass, makes `lattice` conditional on the new top-level `lattice_context` and `review` conditional on `army_requested`, and adds `comments` and `triage.should_fix` (bucket 5). Reading a `schema:12` entry, treat `lattice_context` and `army_requested` as true — both passes always ran then — and `should_fix` as 0. `schema:12` adds `plugin_version` (the version of the plugin copy that ran, which can lag the installed one in a desktop session), `delta.source` (`record` or `runs_index`: where the last review was found), the `carried` architecture gate, and three delta reasons, `prior_blockers_unknown` and — after the user chose the whole PR — `no_prior_review` and `prior_reduced_coverage` as a chosen full review. Reading a `schema:11` entry, treat `plugin_version` and `delta.source` as absent-unknown (the source was always the record), and read its `full` reasons as automatic. `schema:11` adds re-review: an optional `delta` object (present only when `--delta` was asked for) and an optional `fix-check` pass (Pass F). On a `schema:11` entry with `delta.applied:true`, `diff`, `triage`, and the findings cover only the changes since `delta.prior_head`. Reading a `schema:10` entry, treat `delta` as absent — every review covered the whole PR. `schema:10` adds stack mode: an orchestrator entry with `mode: "stack"`, `verdict: "HANDOFF"`, no passes, and a `stack` object holding the plan; and an optional `stack` object on each unit's review entry linking it back by `id`. Reading a `schema:9` entry, treat `stack` as absent — stack mode did not exist. `schema:9` adds `codex_reason` (why Codex ran: the user asked, or high risk forced it — a `schema:8` `codex_requested:true` always means the user asked) and an `architecture` object (the gate's outcome, decision count, and whether a diagram was shown) and two optional passes, `architecture` (Pass D) and `eng-review` (Pass E). A run whose gate did not clear has neither the critic passes nor a normal verdict. Reading a `schema:8` entry, treat `architecture` as absent-unknown — the gate did not exist, and the implementation passes always ran. `schema:8` adds a `pr_context` object (whether the PR's description/discussion was gathered for triage, and its counts) and, for repos whose PR gate runs a static-analysis tool, a `static_analysis` object plus an optional `static-analysis` pass (Pass W) — present in any mode when the PR carried analyzer findings, absent otherwise. Reading a `schema:7` entry, treat `pr_context`, `static_analysis`, and the `static-analysis` pass as absent-unknown — none existed, and chat then carried the full narrative sections and coverage notes that `schema:8` moves to `report.md`. `schema:7` adds an optional `risk` pass (pr mode only), a top-level `risk_level` (Pass K's `low`/`med`/`high`, distinct from the always-present mechanical `risk`), a `ui_preview` object (pr mode only), and a `narrative.diagram` field. Reading a `schema:6` entry, treat `risk_level`, `ui_preview`, the `risk` pass, and `narrative.diagram` as absent-unknown — none existed, and the narrative then carried prose sections rather than a diagram. `schema:6` adds an optional `review` pass — present only on pr-remote runs where `HAS_GSTACK: 1`, carrying Pass R's findings from gstack `/review`. Do not confuse it with the `schema:2` `gstack` pass: both come from running `/review`, but the old one ran in *every* mode and this one is pr-remote only. Reading a `schema:5` entry, treat the `review` pass as absent-unknown — it did not exist, and pr-remote then covered nothing structural. `schema:5` adds `codex_requested` and makes the `codex` pass optional — absent when the run did not request Codex. Reading a `schema:4` entry, treat `codex_requested` as absent-unknown but assume `true`, since Codex ran unconditionally then and its pass will be present. `schema:4` adds `mode`, an optional `pr` object, and an optional fourth `narrative` pass. `schema:3` has three passes and no mode field — read its absence as `review`, since pr mode did not exist. `schema:2` entries carry a different fourth pass, `gstack`, from when this skill ran `/review` itself; a tool reading across versions must not treat either fourth pass's absence as a failure, and must not confuse the two — `gstack` reported findings, `narrative` never does. The shape is otherwise deliberately generic — `skill`, `run_id`, `duration_s`, `passes[]`, `verdict` — so a future cross-skill run-analysis tool can read it alongside other skills' logs without a per-skill parser.
 
 ## Failure modes and recovery
 
@@ -1373,9 +1402,9 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Pass F fails** → continue. Name it in the reduced-coverage line (`earlier blockers not checked`), keep the `fix-check` pass with `"status":"failed"`, and carry the earlier blockers into `blockers.json` unchanged, so the next re-review checks them again.
 - **The review record is not written** (`RECORD: failed`) → continue, and say that a later re-review will run as a full review.
 - **Pass U fails** → do not block. Print `⚠ understanding check did not run`, go to Step 5, name it in the reduced-coverage line, log `architecture.gate: failed`.
-- **Pass U returns invalid Mermaid** → show the text without a diagram, note `understanding ✗ diagram`, and still ask the check questions. Do not hand-fix it.
-- **Pass U returns file paths and function names in BEHAVIOR, or invents a flow for a tooling change** → re-spawn it once with the rules repeated. On a second failure, show what it returned, note it, and still ask.
-- **Pass U returns no CHECK questions for a non-trivial change** → ask one yourself from its NEW_PARTS or BEHAVIOR: *what happens now when …?* Judge the answer against Pass U's text, not your own knowledge of the intent.
+- **Pass U returns invalid Mermaid** → show the text without that diagram, note `understanding ✗ class diagram` or `understanding ✗ sequence diagram`, and still ask the check questions. Do not hand-fix it.
+- **Pass U returns file paths and function names in SYSTEM or BEHAVIOR, check questions about edge cases or races, or invents a flow for a tooling change** → re-spawn it once with the rules repeated. On a second failure, show what it returned, note it, and still ask.
+- **Pass U returns no CHECK questions for a non-trivial change** → ask one yourself from its BEHAVIOR or NEW_PARTS: *in your own words, what does this change do, and which part of the system handles it?* Judge the answer against Pass U's text, not your own knowledge of the intent.
 - **The user answers "yes" or "I understand"** → not an answer. Ask the question again, in their own words.
 - **The user keeps missing a key point** → explain it and ask a new follow-up; after two rounds, ask for a one-line summary (Step 4.8c). Never open the gate on a guess.
 - **The user waives the check** → record `waived`, go to Step 5. Never suggest it.
@@ -1408,9 +1437,9 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 
 ## Examples
 
-**"fresh review my changes before I commit"** on a branch that adds a retry wrapper around the payments client → Steps 1–10. Pass U explains: *before, a timeout from the payment provider failed the checkout; now it retries twice with backoff, then fails.* It shows a class diagram with the new `RetryingClient <<new>>` wrapping the existing client, and one alternative (retry in the job queue instead — simpler, but slower to recover). It asks: *what happens now when the provider times out on a charge that did go through?* The user answers "it retries, so it could charge twice unless the call is idempotent". That holds the key points; the gate opens. Pass I, `/cso`, and (high risk, payment path) Codex run. Chat gets one blocker with its diff — no idempotency key on the retried charge — two should-fix findings, and three added comments to drop.
+**"fresh review my changes before I commit"** on a branch that adds a retry wrapper around the payments client → Steps 1–10. Pass U first says what the payments client is: the one place checkout talks to the payment provider. Then the change: *before, a timeout from the provider failed the checkout; now the client tries twice more, then fails.* It shows a class diagram with the new `RetryingClient <<new>>` wrapping the existing client, a sequence diagram of checkout → retrying client → provider, and one alternative (retry in the job queue instead — simpler, but slower to recover). It asks: *in your own words, what does a shopper see now when the provider is slow, and which part decides to try again?* The user answers "checkout no longer fails on the first timeout; the new wrapper around the client tries twice more before it gives up". That holds the key points; the gate opens. Pass I, `/cso`, and (high risk, payment path) Codex run. Chat gets one blocker with its diff — no idempotency key on the retried charge — two should-fix findings, and three added comments to drop. The double-charge risk is found by the review, not asked of the user.
 
-**"fresh review"** on a one-line bug fix → Pass U: `CHANGE_KIND: behavior`, no new parts, no diagram, one question. The user answers in a sentence; the review runs.
+**"fresh review"** on a one-line bug fix → Pass U: `CHANGE_KIND: behavior`, no new parts, no class diagram, a small sequence diagram of the fixed flow, one question. The user answers in a sentence; the review runs.
 
 **"fresh review"** on a version bump and a README edit → Pass U: `CHANGE_KIND: trivial`. The explanation prints with no question, and the review runs.
 
