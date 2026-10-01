@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "ShuratCode-skills",
   "description": "Shaked Eyal's personal skills for Claude Code and Claude Desktop (Cowork).",
-  "version": "0.23.1",
+  "version": "0.24.0",
   "owner": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"
@@ -14,7 +14,7 @@
     {
       "name": "fresh-review",
       "source": "./plugins/fresh-review",
-      "description": "Understand-first, fresh-eyes code review: it explains the change (behavior before and now, how it fits, a UML diagram for new components, the alternatives), checks with open questions that you understand it, then reviews the implementation with context-isolated subagents — a fast implementation pass and the gstack security audit, lattice only when the feature has a lattice context, Codex on request or on high-risk diffs. Findings print the code they want to change, block only with a concrete failure, and the added comments are listed to drop. PR mode adds a risk class; the gstack review army is opt-in (--army); stack mode plans the reviews of a PR stack; a re-review (--delta) reviews only what changed since the last review and checks the earlier blockers.",
+      "description": "Understand-first, fresh-eyes code review: it explains the change at a high level (the system in brief, behavior before and now, how it fits, a UML class diagram and a sequence diagram, the alternatives), checks with open questions that you know what the change is, then reviews the implementation with context-isolated subagents — a fast implementation pass and the gstack security audit, lattice only when the feature has a lattice context, Codex on request or on high-risk diffs. Findings print the code they want to change, block only with a concrete failure, and the added comments are listed to drop. PR mode adds a risk class; the gstack review army is opt-in (--army); stack mode plans the reviews of a PR stack; a re-review (--delta) reviews only what changed since the last review and checks the earlier blockers.",
       "category": "code-review",
       "keywords": [
         "review",

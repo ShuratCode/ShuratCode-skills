@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.24.0 — 2026-10-01
+
+### `fresh-review` 0.15.1 → 0.16.0: a high-level explanation, two diagrams, and questions about the change
+
+The vi-hub reviews of the last two days showed two problems. The explanation was too detailed: it
+named functions, tables, and tuning values that only make sense after reading the code. And the
+check questions asked about races, failure modes, and why one detail was picked — they tested whether
+the user could find bugs, not whether they knew what the change is.
+
+- **The explanation is high level.** Pass U writes for an engineer new to the project. A new first
+  section, **The system in brief**, says what this part of the project is and what it is for. The
+  other sections use domain words only: no function names, file paths, edge cases, or tuning values.
+- **Two UML diagrams.** Pass U now draws a class diagram of the main parts and a sequence diagram of
+  the main flow, from trigger to outcome. Both are small (about 8 boxes, about 6 participants). Each
+  renders to its own PNG. The log's `architecture.diagram` can now be `both`.
+- **The check asks what the change is.** The questions ask what the change does, what starts it, the
+  role of the main new part, and why it is needed. A reader of the explanation can answer them from
+  it alone. They never ask about edge cases, races, or failure modes — finding those is the review's
+  job.
+
 ## 0.23.1 — 2026-09-29
 
 ### `fresh-review` 0.15.0 → 0.15.1: the review reads like a chat reply
