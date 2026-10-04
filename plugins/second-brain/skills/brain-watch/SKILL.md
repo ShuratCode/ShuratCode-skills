@@ -40,6 +40,8 @@ amendment adding Watch to the raw layer — it does not apply one. On first use,
 amendment (a "Watch" entry in §3's database guide and the §4 capture flow, mirroring Podcasts) and let
 him add it. Until then, act on the analogy and say you are doing so.
 
+A Handbook amendment for Watch is now pending Shaked's approval. Keep this section until it lands.
+
 ## The one fact everything follows from
 
 **The agent cannot watch video or read slides.** The durable knowledge is in what is said and shown;
@@ -97,12 +99,9 @@ order: `## My notes` and `## Transcript` carry the knowledge; `## Description` i
 
 1. **Discuss, then write.** Present takeaways and state exactly which Zettels you'll create and which
    rows you'll fuse into — then **wait for Shaked's reaction.**
-2. **Literature row** — `Name`, `Topics`, `Source URL`, `Source type` = `video`*, `Raw (…)` relation
-   to the Watch row, `Verdict` (copied), `Language`. Body: `## Summary` · `## Key claims` ·
+2. **Literature row** — `Name`, `Topics`, `Source URL`, `Source type` = `video`, `Raw (Video)`
+   relation to the Watch row, `Verdict` (copied), `Language`. Body: `## Summary` · `## Key claims` ·
    `## Disagreements` · `## How to apply` · `## Open questions`.
-   *`video` is a new `Source type` option and a new `Raw (Watch)` relation on Literature — both part
-   of the proposed Handbook/schema amendment. If they don't exist yet, flag it and let Shaked add
-   them (`notion-update-data-source`) rather than forcing a mismatched value.
 3. **Atomic Zettels** — one idea each. **Search Zettels first** and **fuse** rather than spawn a
    near-twin. Each new Zettel gets `Source` and at least one `Related`; set `Zettels` on the
    Literature row.
@@ -120,8 +119,9 @@ order: `## My notes` and `## Transcript` carry the knowledge; `## Description` i
 - **Triage** — "is this video worth my time?": summarise from whatever is fetchable, let Shaked set
   the `Verdict`, *then* follow the normal path.
 - **Discuss** — "I watched X, here's what stuck": create the row, record his takeaways under
-  `## My notes`, ingest from there. A **first-class path** — for a slide-heavy talk it is often the
-  only faithful source.
+  `## My notes`, set `Has notes` = true, ingest from there. `Has notes` is pending in Notion: set it
+  once the property exists on Watch, and skip it until then. A **first-class path** — for a
+  slide-heavy talk it is often the only faithful source.
 
 ## Things to get right
 
@@ -132,6 +132,6 @@ order: `## My notes` and `## Transcript` carry the knowledge; `## Description` i
 
 ## Finish clean
 
-Confirm the video has left `Awaiting ingest`, the `Raw (Watch)` relation is set on the Literature row,
+Confirm the video has left `Awaiting ingest`, the `Raw (Video)` relation is set on the Literature row,
 and each new Zettel has a `Source` and a `Related`. If you stopped at rung 3/4, you correctly wrote
 nothing — the ball is with Shaked.
