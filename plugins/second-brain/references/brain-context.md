@@ -80,9 +80,11 @@ The IDs below are stable, but the authoritative live list is the **🧠 Second B
 
 ## Notion tool notes (Free plan)
 
-- Retrieval: keyword `notion-search`, `notion-query-data-sources` (**view/rows mode** — SQL mode is
-  metered and gets refused after a few calls), and `notion-fetch` to read a row. Try more than one
-  phrasing; search in the source's language (the workspace is bilingual en/he).
+- Retrieval: keyword `notion-search`, `notion-query-data-sources`, and `notion-fetch` to read a row.
+  Try more than one phrasing; search in the source's language (the workspace is bilingual en/he).
+- **Use view mode for anything bulk.** SQL mode and rows mode share one metered Free-plan quota.
+  On 2026-10-04 rows mode was refused with "usage limit reached" after about 8 SQL/rows calls. Keep
+  SQL and rows mode for one-off checks only.
 - Discuss-then-write, **one source at a time**. Present takeaways and state what you will write or
   fuse, then wait for Shaked's reaction. The pause is where his thinking happens.
 - Writing an open-vocabulary select value (`Topics`, `Tags`, `Feed`, `Show`, `Region`, Places `Type`,

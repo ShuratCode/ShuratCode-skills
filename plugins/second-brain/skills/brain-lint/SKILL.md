@@ -31,7 +31,7 @@ explicit approval.** Lint proposes; Shaked disposes.
 
 ## Scan
 
-Query the databases (`notion-query-data-sources` in view/rows mode; `notion-search`; `notion-fetch`
+Query the databases (`notion-query-data-sources` in view mode; `notion-search`; `notion-fetch`
 to read rows) and look for:
 
 - **Duplicates / near-twins** — two Zettels on the same idea that should fuse (guardrail 2).
