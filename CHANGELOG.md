@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.24.1 — 2026-10-04
+
+### `second-brain` 0.1.0 → 0.1.1: detect false stamps, fix the shared-context path
+
+On 2026-10-02 the capture bot stamped `Ingested` on a Podcasts row that had no Literature row. The
+row looked ingested, but the wiki had nothing from it.
+
+- **False-stamp check.** brain-sweep and brain-lint read each raw database's stamped view in view
+  mode and report rows with a `keep` or `reference` verdict and an empty `Literature`. They never
+  clear a stamp. `skip` rows are fine.
+- **Watch → `Blocked`.** brain-sweep and brain-lint report blocked videos, the same rule as
+  Podcasts. If the view does not exist yet, they say so.
+- **Shared-context path.** Every skill now points to `../../references/brain-context.md`, which
+  resolves from the skill folder in the repo and in the plugin cache.
+- **Rows mode is metered too.** brain-context says to use view mode for anything bulk. SQL and rows
+  mode share one Free-plan quota.
+- **brain-watch.** The Literature relation is `Raw (Video)`. `Source type` = `video` already exists.
+  The Discuss path sets `Has notes` once that property exists. The Handbook now documents Watch
+  (changelog 2026-10-04), so brain-watch and `/sb-watch` point to Handbook §3 (Watch) and §4 (Video
+  capture flow) instead of applying the Podcasts rules by analogy.
+
 ## 0.24.0 — 2026-10-01
 
 ### `fresh-review` 0.15.1 → 0.16.0: a high-level explanation, two diagrams, and questions about the change

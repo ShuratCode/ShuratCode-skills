@@ -20,7 +20,7 @@ book-specific judgment — **the rules live in the Agent Handbook.**
    workspace is Shaked's personal Second Brain — "Shaked Eyal's Space", ID
    `2c05827a-8670-8111-803a-000379a6da64`. **Stop and report** on any other workspace or account (a
    `@vi.co` work login, guest access, or anything unexpected). Check the workspace identity, not just
-   the email. (Full guard in `references/brain-context.md`.)
+   the email. (Full guard in `../../references/brain-context.md`.)
 2. **Load the contract, live.** `notion-fetch` the **Agent Handbook**
    (`https://app.notion.com/p/3dc5827a8670817aa9a4e715caf367cf`) — especially **§4 → Book digest
    flow**, which is the spec for this skill. The Handbook wins on **workflow** — it never overrides the

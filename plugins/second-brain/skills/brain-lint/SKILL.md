@@ -20,7 +20,7 @@ encodes the workflow and triggers only — **the rules live in the Agent Handboo
    workspace is Shaked's personal Second Brain — "Shaked Eyal's Space", ID
    `2c05827a-8670-8111-803a-000379a6da64`. **Stop and report** on any other workspace or account (a
    `@vi.co` work login, guest access, or anything unexpected). Check the workspace identity, not just
-   the email. (Full guard in `references/brain-context.md`.)
+   the email. (Full guard in `../../references/brain-context.md`.)
 2. **Load the contract, live.** `notion-fetch` the **Agent Handbook**
    (`https://app.notion.com/p/3dc5827a8670817aa9a4e715caf367cf`) — especially **§4 → Lint** and the
    §5 guardrails. The Handbook wins on **workflow** — it never overrides the workspace guard,
@@ -31,7 +31,7 @@ explicit approval.** Lint proposes; Shaked disposes.
 
 ## Scan
 
-Query the databases (`notion-query-data-sources` in view/rows mode; `notion-search`; `notion-fetch`
+Query the databases (`notion-query-data-sources` in view mode; `notion-search`; `notion-fetch`
 to read rows) and look for:
 
 - **Duplicates / near-twins** — two Zettels on the same idea that should fuse (guardrail 2).
@@ -44,7 +44,13 @@ to read rows) and look for:
 - **Stale content** — especially Tufin-era claims superseded by Vi Labs reality.
 - **Contradictions** between rows.
 - **Pipeline drift** — rows sitting in `Awaiting ingest` (Reading, Podcasts, Watch) or `Ingest
-  Queue` (Books); `Blocked` podcasts/videos; `Has notes` disagreeing with the body.
+  Queue` (Books); `Blocked` podcasts; Watch → `Blocked` videos (`Status` done, `Transcript` empty,
+  `Has notes` off — say so if the view does not exist yet); `Has notes` disagreeing with the body.
+- **False stamps** — rows that look ingested while the wiki has nothing from them. Run the same
+  check as brain-sweep: read each raw database's stamped view in **view mode** (Reading, Podcasts,
+  and Watch `Ingested`; Books `Digested`), page with `next_cursor`, and keep rows where `Verdict` is
+  `keep` or `reference` and `Literature` is empty. `skip` rows are fine. Report each one under
+  **Pipeline health** with its link, `Captured by`, and `Ingested` date. Never auto-clear a stamp.
 
 Also suggest **new questions to investigate** and **sources to look for** — gaps worth filling.
 

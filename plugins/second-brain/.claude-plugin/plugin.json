@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "second-brain",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ingest, query, lint, book-note, book-digest, podcast, watch, and sweep operations for Shaked's LLM-maintained Notion second brain. Each skill runs the workspace guard and defers to the workspace's Agent Handbook as the single source of truth.",
   "author": {
     "name": "Shaked Eyal",

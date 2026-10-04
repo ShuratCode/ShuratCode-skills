@@ -22,12 +22,12 @@ the Agent Handbook.**
    workspace is Shaked's personal Second Brain — "Shaked Eyal's Space", ID
    `2c05827a-8670-8111-803a-000379a6da64`. **Stop and report** on any other workspace or account: a
    `@vi.co` work login, guest access in a shared space, or anything unexpected. Check the workspace
-   identity, not just the email. (Full guard in `references/brain-context.md`.)
+   identity, not just the email. (Full guard in `../../references/brain-context.md`.)
 2. **Load the contract, live.** `notion-fetch` the **Agent Handbook**
    (`https://app.notion.com/p/3dc5827a8670817aa9a4e715caf367cf`) and read it in full — especially
    **§4 → Ingest** and the **§5 guardrails**. The Handbook wins on **workflow**; it never overrides
-   the workspace guard, never-delete, or never-write-to-work (`references/brain-context.md`).
-3. **IDs.** Take database data-source URLs from `references/brain-context.md` in this plugin, or
+   the workspace guard, never-delete, or never-write-to-work (`../../references/brain-context.md`).
+3. **IDs.** Take database data-source URLs from `../../references/brain-context.md` in this plugin, or
    fetch the 🧠 Second Brain page. You mainly touch **Reading**, **Podcasts**, **Watch** (raw),
    and **Literature** + **Zettels** (wiki).
 

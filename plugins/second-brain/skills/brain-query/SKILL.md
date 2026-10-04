@@ -20,7 +20,7 @@ triggers only — **the rules live in the Agent Handbook.**
    workspace is Shaked's personal Second Brain — "Shaked Eyal's Space", ID
    `2c05827a-8670-8111-803a-000379a6da64`. **Stop and report** on any other workspace or account (a
    `@vi.co` work login, guest access, or anything unexpected). Check the workspace identity, not just
-   the email. (Full guard in `references/brain-context.md`.)
+   the email. (Full guard in `../../references/brain-context.md`.)
 2. **Load the contract, live.** `notion-fetch` the **Agent Handbook**
    (`https://app.notion.com/p/3dc5827a8670817aa9a4e715caf367cf`) — especially **§4 → Query** and
    guardrail 1. The Handbook wins on **workflow** — it never overrides the workspace guard,
@@ -39,8 +39,8 @@ There is no qmd and no `ai_search` here. Retrieval is Notion's own:
 1. **`notion-search`** with short, specific keywords. **Try more than one phrasing**, and search in
    the **source's language** — the workspace is bilingual (en/he), so run Hebrew and English queries.
 2. **`notion-query-data-sources`** to filter a database precisely (Zettels by `Topics`, Literature
-   by `Source type`, etc.). Use **view mode or rows mode** — SQL mode is metered on the Free plan
-   and gets refused after a few calls.
+   by `Source type`, etc.). Use **view mode**. SQL mode and rows mode share one metered Free-plan
+   quota and get refused after a few calls — keep them for one-off checks only.
 3. **`notion-fetch`** to read the rows that actually matter — properties and body, not just the
    search snippet.
 
