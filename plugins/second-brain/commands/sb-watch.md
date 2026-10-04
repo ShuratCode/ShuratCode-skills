@@ -7,4 +7,4 @@ Invoke the **brain-watch** skill via the Skill tool and hand it the user's reque
 
 $ARGUMENTS
 
-Do not reimplement the workflow yourself, and never write Zettels from a description alone. Hand off immediately and let the brain-watch skill drive the run, running the workspace guard and deferring to the Notion Agent Handbook as its source of truth. Watch is not yet in the Handbook — the skill proposes an amendment rather than editing it. On description-only or nothing-fetchable it stops and asks.
+Do not reimplement the workflow yourself, and never write Zettels from a description alone. Hand off immediately and let the brain-watch skill drive the run, running the workspace guard and deferring to the Notion Agent Handbook as its source of truth. Watch rules live in Handbook §3 (Watch) and §4 (Video capture flow). On description-only or nothing-fetchable it stops and asks.

@@ -17,7 +17,9 @@ row looked ingested, but the wiki had nothing from it.
 - **Rows mode is metered too.** brain-context says to use view mode for anything bulk. SQL and rows
   mode share one Free-plan quota.
 - **brain-watch.** The Literature relation is `Raw (Video)`. `Source type` = `video` already exists.
-  The Discuss path sets `Has notes` once that property exists. The Handbook amendment is pending.
+  The Discuss path sets `Has notes` once that property exists. The Handbook now documents Watch
+  (changelog 2026-10-04), so brain-watch and `/sb-watch` point to Handbook §3 (Watch) and §4 (Video
+  capture flow) instead of applying the Podcasts rules by analogy.
 
 ## 0.24.0 — 2026-10-01
 

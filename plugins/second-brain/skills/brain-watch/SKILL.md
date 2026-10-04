@@ -28,19 +28,7 @@ rules live in the Agent Handbook.**
 never-delete, or never-write-to-work.
 3. **Watch data source:** `collection://2b61007b-0111-436b-b2ff-3be878182089`.
 
-## Contract boundary — the Handbook does not yet document Watch
-
-The 🎥 Watch database exists but the Agent Handbook (as of its 2026-09-16 version) **does not describe
-it.** Watch is structurally a raw-source twin of Podcasts, so this skill applies the Podcasts rules to
-it by analogy: raw layer, immutable once captured, agent writes only the stamp (`Ingested`,
-`Literature`) and the row at capture; **never** set `Status` or `Verdict`.
-
-Per guardrail 7 (**never edit the Handbook without instruction**), this skill **proposes** a Handbook
-amendment adding Watch to the raw layer — it does not apply one. On first use, offer Shaked the draft
-amendment (a "Watch" entry in §3's database guide and the §4 capture flow, mirroring Podcasts) and let
-him add it. Until then, act on the analogy and say you are doing so.
-
-A Handbook amendment for Watch is now pending Shaked's approval. Keep this section until it lands.
+Watch rules live in Handbook §3 (Watch) and §4 (Video capture flow).
 
 ## The one fact everything follows from
 
@@ -57,9 +45,9 @@ create a twin.**
 
 If not, **create the row**: `Name` (the talk title), `Captured by` = `Claude`, filling what you can
 find (`Channel`, `Speaker`, `Source URL`, `Duration`, `Published`, `Language`). Unknown properties
-stay blank. Apply the body scaffold `## Description` · `## Transcript` · `## My notes` (the proposed
-Watch scaffold; mirrors Podcasts). `Channel` is a select — if the channel isn't an existing option,
-add it with `notion-update-data-source` first, then write the row.
+stay blank. Apply the body scaffold `## Description` · `## Transcript` · `## My notes`. `Channel` is
+a select — if the channel isn't an existing option, add it with `notion-update-data-source` first,
+then write the row.
 
 Once the row exists it is read-only apart from the stamp. Never rewrite `## My notes`. Never set
 `Status` or `Verdict`.
