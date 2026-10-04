@@ -47,7 +47,30 @@ mandates view mode for the sweep). Read each database's work-list view:
 Also check the health views, and report them even when there's no ingest work:
 
 - **Podcasts → `Blocked`** (done, transcript empty, no notes) — nothing durable behind them.
+- **Watch → `Blocked`** (`Status` done, `Transcript` empty, `Has notes` off) — same rule as
+  Podcasts. Find the view by name on the Watch database
+  (`collection://2b61007b-0111-436b-b2ff-3be878182089`). If it does not exist yet, say so under
+  Pipeline health and continue.
 - Anything long-stuck in `Awaiting ingest` / `Ingest Queue` from a previous sweep.
+
+### False stamps
+
+A false stamp is a row that looks ingested while the wiki has nothing from it. For each raw
+database, read its stamped view in **view mode** and keep the rows where `Verdict` is `keep` or
+`reference` **and** `Literature` is empty:
+
+| Database | View | View URL |
+|---|---|---|
+| Reading | `Ingested` | `view://3dc5827a-8670-8167-9716-000cc2e70fd4` |
+| Podcasts | `Ingested` | `view://3dc5827a-8670-81af-976f-000cb36b005d` |
+| Books | `Digested` | `view://3dc5827a-8670-81a2-8625-000cd45720e5` |
+| Watch | `Ingested` | `view://3dd5827a-8670-81e9-902a-000c5c76b064` |
+
+Page through each view with `next_cursor` until it is empty. `skip` rows are fine: they have
+`Ingested` and no `Literature` by design.
+
+**Read-only.** Report each false stamp with its link, `Captured by`, and `Ingested` date. Never
+clear or change a stamp — Shaked decides what to do with it.
 
 ## Step 2 — Read each waiting row and draft takeaways
 
@@ -80,7 +103,9 @@ Structure it worst-first / most-actionable-first:
 2. **Blocked** — rows that hit a hard stop (podcast/video rung 3/4, empty book notes). Say exactly
    what's missing and the choices (transcribe / give takeaways / skip).
 3. **Stamp-and-clear** — `skip` rows that just need the `Ingested` stamp.
-4. **Pipeline health** — counts per view, anything stuck across sweeps, `Blocked` podcasts.
+4. **Pipeline health** — counts per view, anything stuck across sweeps, `Blocked` podcasts,
+   `Blocked` videos (or a note that the Watch `Blocked` view does not exist yet), and every false
+   stamp with its link, `Captured by`, and `Ingested` date.
 
 ## Step 4 — Hand off; do not write the wiki here
 

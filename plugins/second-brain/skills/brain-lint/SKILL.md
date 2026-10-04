@@ -44,7 +44,13 @@ to read rows) and look for:
 - **Stale content** — especially Tufin-era claims superseded by Vi Labs reality.
 - **Contradictions** between rows.
 - **Pipeline drift** — rows sitting in `Awaiting ingest` (Reading, Podcasts, Watch) or `Ingest
-  Queue` (Books); `Blocked` podcasts/videos; `Has notes` disagreeing with the body.
+  Queue` (Books); `Blocked` podcasts; Watch → `Blocked` videos (`Status` done, `Transcript` empty,
+  `Has notes` off — say so if the view does not exist yet); `Has notes` disagreeing with the body.
+- **False stamps** — rows that look ingested while the wiki has nothing from them. Run the same
+  check as brain-sweep: read each raw database's stamped view in **view mode** (Reading, Podcasts,
+  and Watch `Ingested`; Books `Digested`), page with `next_cursor`, and keep rows where `Verdict` is
+  `keep` or `reference` and `Literature` is empty. `skip` rows are fine. Report each one under
+  **Pipeline health** with its link, `Captured by`, and `Ingested` date. Never auto-clear a stamp.
 
 Also suggest **new questions to investigate** and **sources to look for** — gaps worth filling.
 
