@@ -49,7 +49,7 @@ printf 'brand new\n' > "$WT/untracked.txt"
 
 printf '\n\033[1mfresh-review default mode\033[0m\n'
 
-(cd "$WT" && bash "$SCRIPTS/fr-preflight.sh" > "$TMP/pf.out" 2>&1)
+(cd "$WT" && env -u FR_MODEL_U -u FR_MODEL_I -u FR_MODEL_B -u FR_MODEL_A -u FR_MODEL_K -u FR_MODEL_W -u FR_MODEL_F -u FR_MODEL_R -u FR_MODEL_X bash "$SCRIPTS/fr-preflight.sh" > "$TMP/pf.out" 2>&1)
 want "$TMP/pf.out" STATUS ok "preflight with no arguments"
 want "$TMP/pf.out" MODE review "preflight with no arguments"
 want "$TMP/pf.out" PR_REF none "preflight with no arguments"
@@ -144,6 +144,21 @@ if ( set -eu; . "$QSTATE"; [ "$BRANCH" = "wip'quote" ] ) 2>/dev/null; then
   ok "state.env re-sources and BRANCH round-trips through a single quote"
 else
   bad "state.env quoting" "sources with BRANCH=wip'quote" "source failed or BRANCH wrong"
+fi
+
+SSTATE="$(key "$TMP/pf.out" STATE)"
+if ( set -eu; . "$SSTATE"; [ "$MODEL_U" = opus ] && [ "$MODEL_I" = opus ] && [ "$MODEL_B" = opus ] \
+     && [ "$MODEL_W" = sonnet ] && [ "$MODEL_X" = haiku ] && [ "$MODEL_R" = inherit ] ) 2>/dev/null; then
+  ok "state.env carries the per-pass subagent models"
+else
+  bad "subagent models in state.env" "U/I/B=opus W=sonnet X=haiku R=inherit" "mismatch"
+fi
+[ -n "$(key "$TMP/pf.out" SUBAGENT_MODELS)" ] && ok "preflight prints SUBAGENT_MODELS" \
+  || bad "preflight SUBAGENT_MODELS" "non-empty" ""
+if [ "$(FR_MODEL_I=sonnet bash "$SCRIPTS/fr-models.sh" | grep '^I=')" = "I=sonnet" ]; then
+  ok "FR_MODEL_<pass> overrides one pass"
+else
+  bad "FR_MODEL_I override" "I=sonnet" "no override"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
