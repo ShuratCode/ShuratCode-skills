@@ -192,6 +192,7 @@ RUN_DIR="$REPORT_DIR/runs/$RUN_ID"
 mkdir -p "$RUN_DIR/packet" "$RUN_DIR/raw" "$LOG_DIR"
 
 STATE="$RUN_DIR/state.env"
+MODELS="$(bash "$PLUGIN_ROOT/scripts/fr-models.sh")"
 # Every value is single-quote-escaped before it lands in state.env — a repo path
 # or branch name containing a `'` would otherwise unbalance the quoting and break
 # the `.` source in every later script. Same helper shape as fr-pr-resolve.sh's
@@ -231,6 +232,7 @@ kv() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"; }
   kv DIFF_CMD "$DIFF_CMD"
   kv TS_START "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   kv T0 "$(date +%s)"
+  while IFS='=' read -r pass model; do kv "MODEL_$pass" "$model"; done <<< "$MODELS"
 } > "$STATE"
 
 emit "=== FRESH-REVIEW PREFLIGHT ==="
@@ -263,4 +265,5 @@ emit "GSTACK_BIN: ${GSTACK_BIN:-none}"
 emit "SOURCE_ROOT: $REPO_ROOT"
 emit "REVIEW_SCOPE: $REVIEW_SCOPE"
 emit "DIFF_CMD: $DIFF_CMD"
+emit "SUBAGENT_MODELS: $(printf '%s' "$MODELS" | tr '\n' ' ')"
 emit "=== END ==="

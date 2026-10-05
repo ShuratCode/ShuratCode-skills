@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.25.0 — 2026-10-05
+
+### `fresh-review` 0.16.0 → 0.17.0: a pinned model for each subagent
+
+Every subagent ran on the session's model, so an Opus session ran every pass on Opus. The
+passes that find blockers need depth. The rest are bounded checks.
+
+- **Per-pass models.** `scripts/fr-models.sh` holds the table. Explain (U), implementation (I), and
+  security (B) run on Opus. Lattice (A), risk (K), static-analysis (W), and fix check (F) run on
+  Sonnet. The Codex compactor (X) runs on Haiku. The review army (R) inherits.
+- **Carried in `state.env`.** Preflight writes `MODEL_<pass>` and prints `SUBAGENT_MODELS`.
+  SKILL.md sets `model` on each Agent call from them.
+- **Override.** `FR_MODEL_<pass>=sonnet` changes one pass for one run.
+- **Orchestrator.** It cannot change its own model. SKILL.md says to run it on Sonnet.
+
 ## 0.24.1 — 2026-10-04
 
 ### `second-brain` 0.1.0 → 0.1.1: detect false stamps, fix the shared-context path

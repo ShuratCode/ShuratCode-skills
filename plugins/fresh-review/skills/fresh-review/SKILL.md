@@ -581,7 +581,7 @@ Three parts, in order: explain (Pass U), show, check.
 
 #### 4.8a: Pass U — explain the change
 
-**Pass U is the first reviewer of the run, and it runs alone.** Launch it in its own message: one subagent, no other subagent, no Codex command, no Step 5 work. Its prompt is the Step 5 isolation contract, verbatim, followed by this task, which replaces the contract's return-format block:
+**Pass U is the first reviewer of the run, and it runs alone.** Launch it with `model: $MODEL_U` (see "Subagent models" in Step 5), in its own message: one subagent, no other subagent, no Codex command, no Step 5 work. Its prompt is the Step 5 isolation contract, verbatim, followed by this task, which replaces the contract's return-format block:
 
 > Your job is not to find defects. Your job is to explain this change at a high level, so the reader knows what it is before anyone reviews the code. Write for an engineer who is new to this project and is asked to review this change on their first day: they know how to code, but they do not know this system, its names, or its history. Give them the big picture, not the internals. Read `{{RUN_DIR}}/packet/ddd.md` first — the repo's domain vocabulary — then `diff.patch`. Open a source file from `{{SOURCE_ROOT}}` only to learn what an existing thing is, or who calls it.
 >
@@ -763,6 +763,8 @@ Runs only after Step 4.8 cleared: the user showed they understand, the check was
 ```
 
 `ARCH_GATE: open` → launch the fan-out below. `ARCH_GATE: closed` → **launch nothing.** `REASON` is `pending` (the check is not done — go back to 4.8c) or `not_decided` (Step 4.8 did not finish). There is no override: the only ways to open the gate are the user's answer, an explicit waiver, a Pass U result, or `--understood`.
+
+**Subagent models.** Every subagent runs on a model chosen by pass, not on the session's model. `fr-preflight.sh` printed them as `SUBAGENT_MODELS` and wrote them to `state.env` as `MODEL_<pass>`. Set `model` on each Agent call to the pass's value — `MODEL_U` (explain), `MODEL_I` (implementation), `MODEL_B` (cso), `MODEL_A` (lattice), `MODEL_K` (risk), `MODEL_W` (static-analysis), `MODEL_F` (fix check), `MODEL_R` (review army), `MODEL_X` (Codex compactor). The value `inherit` means: leave `model` off. The table lives in `scripts/fr-models.sh`; one pass can be overridden for a run with `FR_MODEL_<pass>`. Pass C is a Codex process and has its own model setting. A re-spawn uses the same model as the first launch. This skill cannot change the model of the session that runs it: run the orchestrator on Sonnet, because it only builds packets, launches passes, and triages.
 
 Launch the Claude subagents **in a single message**:
 
@@ -1043,7 +1045,7 @@ Budget expectations: measured floor is ~30s on an *empty* diff (process start, g
 [ -f "$RUN_DIR/raw/codex.rc" ] && echo "CODEX_DONE rc=$(cat "$RUN_DIR/raw/codex.rc")" || echo "CODEX_RUNNING"
 ```
 
-- **Done, rc=0** → compact it. Codex prepends repo instruction text and template scaffolding to its output, so do not read `codex.md` into your own context. Spawn one cheap compactor subagent: *"Read `$RUN_DIR/raw/codex.md`. It contains echoed instruction text and template scaffolding before the real content — ignore all of it. Return only the Step 5 compact block with `PASS: codex`, one line per genuine finding, each with its ` ```diff ` block when Codex gave a code fix. No preamble."*
+- **Done, rc=0** → compact it. Codex prepends repo instruction text and template scaffolding to its output, so do not read `codex.md` into your own context. Spawn one compactor subagent with `model: $MODEL_X`: *"Read `$RUN_DIR/raw/codex.md`. It contains echoed instruction text and template scaffolding before the real content — ignore all of it. Return only the Step 5 compact block with `PASS: codex`, one line per genuine finding, each with its ` ```diff ` block when Codex gave a code fix. No preamble."*
 - **Done, rc≠0** → read `codex.err`, record `CODEX_FAILED: <reason>`, continue.
 - **Still running past `CODEX_JOIN_BUDGET`** → when `CODEX_REASON` is `asked`, proceed without it. The verdict ships labeled Claude-only, and when the background task exits you post the addendum (Step 8.5). Nothing is killed; the work completes and lands on disk either way.
 - **Still running, and the run is high-risk** (`RISK: high`, or `CODEX_REASON` is `risk` / `risk-pass`) → **do not proceed.** Codex is required here, so the budget does not apply. Say `Codex ⧗ required for a high-risk change — waiting` and wait for the background task to exit; the harness re-invokes you when it does.
