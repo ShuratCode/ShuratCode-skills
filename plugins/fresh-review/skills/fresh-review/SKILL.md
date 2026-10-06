@@ -240,7 +240,7 @@ Five invariants. Every step below is built around them; violating one silently m
 2. **Reviewers read the packet, not git — and never the PR context.** The diff is materialized once (Step 4) and every isolated pass is handed the same file paths. No isolated pass re-derives scope, runs `git diff`, or opens `pr-context/`. Pass W is the sole exception on both counts: it reads `pr-context/` because verifying analyzer findings is its whole job, and it is not a critic.
 3. **Passes return compact findings; prose goes to disk.** This is the largest saving by far. `/cso` alone emits thirteen numbered phases of narrative; the compact block is a few hundred tokens. Each pass writes its full report to `$RUN_DIR/raw/` and returns only the fixed-format block in Step 5.
 4. **Raw reports are not read back.** Triage runs on the compact blocks. Open a raw report only to disambiguate one specific finding, and read only that finding's section.
-5. **Nothing heavy enters the orchestrator by accident.** Never open a rendered PNG with Read — `SendUserFile` it; an image costs ~40k tokens. Never re-read this SKILL.md mid-run; it is already loaded. Past runs lost 370k tokens this way. The orchestrator makes ~40 calls per run, and everything in its context is paid again on every call.
+5. **Nothing heavy enters the orchestrator by accident.** Never open a rendered PNG with Read — open it in Preview with `open`; an image costs ~40k tokens. Never re-read this SKILL.md mid-run; it is already loaded. Past runs lost 370k tokens this way. The orchestrator makes ~40 calls per run, and everything in its context is paid again on every call.
 
 The same principle governs the shell work: every mechanical step is a script in `${CLAUDE_PLUGIN_ROOT}/scripts/` that prints a small delimited key block. Read the block, not the machinery. Do not reimplement a script's logic inline — the scripts are where the gating rules are actually enforced, and a hand-typed variant of one is how those rules get lost.
 
@@ -690,16 +690,19 @@ Rules:
 
 - **No code block around the explanation.** It is normal chat text. The only code blocks it may hold are the ` ```mermaid ` fallbacks below. File paths are links, as in Step 8.
 - **Print Pass U's text verbatim.** Do not rewrite, "improve", or merge it with what you know. You hold the producer context; Pass U does not, and that is the point.
-- **Render each diagram, do not print its source.** Write the CLASS_DIAGRAM source (without the fence) to `$RUN_DIR/ui/class.mmd` and the SEQUENCE_DIAGRAM source to `$RUN_DIR/ui/sequence.mmd` — skip a field that is `none` — and render each one that exists:
+- **Render each diagram in Excalidraw, do not print its source.** Write the CLASS_DIAGRAM source (without the fence) to `$RUN_DIR/ui/class.mmd` and the SEQUENCE_DIAGRAM source to `$RUN_DIR/ui/sequence.mmd` — skip a field that is `none` — and render them:
 
   ```bash
   mkdir -p "$RUN_DIR/ui"
-  for d in class sequence; do
-    [ -f "$RUN_DIR/ui/$d.mmd" ] && mmdc -i "$RUN_DIR/ui/$d.mmd" -o "$RUN_DIR/ui/$d.png"
-  done
+  . "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-diagrams.sh" "$RUN_DIR"
   ```
 
-  `SendUserFile` each PNG that rendered, under its heading, the class diagram first. **Never open a PNG with Read** — an image costs ~40k tokens in your context, and you do not need to see it. When `mmdc` is missing or one diagram errors, print that diagram's ` ```mermaid ` fence instead — one or the other per diagram, never both. Do not hand-fix invalid Mermaid; a diagram you drew carries your knowledge of the intent.
+  The script uses the same offline pipeline as gstack's `/diagram` skill: each diagram becomes an editable `.excalidraw` file plus an SVG and a PNG. When gstack's render bundle or `bun` is missing, or the Excalidraw render errors, it falls back to `mmdc`, the Mermaid CLI. It prints one `DIAGRAM_<class|sequence>` line per diagram: `excalidraw`, `mermaid` (the fallback rendered), `failed`, or `none` (no source).
+
+  - **Show each PNG.** Open it in Preview with `open "<PNG_x path>"`, the class diagram first, and name it under its heading. Where `open` does not exist (not macOS), `SendUserFile` it instead. When the user asked to see the diagrams in the terminal, run `imgcat "<PNG_x path>"` instead.
+  - **Link the Excalidraw file** (`EXCALIDRAW_<x>`) under the heading, so the user can open it at excalidraw.com and edit it. When `EDITABLE_<x>: no` — Excalidraw imports a class diagram as one image — say so in a few words: the user can move and mark it up, not edit box by box.
+  - **`failed`** → print that diagram's ` ```mermaid ` fence instead — one or the other per diagram, never both.
+  - **Never open a PNG with Read** — an image costs ~40k tokens in your context, and you do not need to see it. Do not hand-fix invalid Mermaid; a diagram you drew carries your knowledge of the intent.
 - **Alternatives the author named.** When `PR_CONTEXT: present` and `pr-context/body.md` names alternatives the author considered, or (on your own branch) this session discussed alternatives, add them under `Alternatives the author named`, labeled as such. This is for the human only — it never reaches a pass.
 - **The PR title line** is the highest-value line of an explanation. When BEHAVIOR and the PR title disagree, print `⚠ The PR title says <x>; the code says <y>.` State both; do not editorialize. On a re-review, never print it: the title describes the whole PR and the explanation only the delta.
 - **On a re-review** the label is `**What changed since the last review** (PR #<n>: <title>)`.
@@ -1404,7 +1407,8 @@ Fill the zeroed fields from the actual run — per-pass wall time, per-pass find
 - **Pass F fails** → continue. Name it in the reduced-coverage line (`earlier blockers not checked`), keep the `fix-check` pass with `"status":"failed"`, and carry the earlier blockers into `blockers.json` unchanged, so the next re-review checks them again.
 - **The review record is not written** (`RECORD: failed`) → continue, and say that a later re-review will run as a full review.
 - **Pass U fails** → do not block. Print `⚠ understanding check did not run`, go to Step 5, name it in the reduced-coverage line, log `architecture.gate: failed`.
-- **Pass U returns invalid Mermaid** → show the text without that diagram, note `understanding ✗ class diagram` or `understanding ✗ sequence diagram`, and still ask the check questions. Do not hand-fix it.
+- **A diagram does not render** (`DIAGRAM_<x>: failed`, most often invalid Mermaid from Pass U) → print its fence as 4.8b says, note `understanding ✗ class diagram` or `understanding ✗ sequence diagram`, and still ask the check questions. Do not hand-fix it.
+- **Excalidraw cannot render** (no gstack bundle, no `bun`, no browser) → `fr-diagrams.sh` falls back to `mmdc` on its own. Say once, in a few words, that the diagrams are Mermaid PNGs, not Excalidraw.
 - **Pass U returns file paths and function names in SYSTEM or BEHAVIOR, check questions about edge cases or races, or invents a flow for a tooling change** → re-spawn it once with the rules repeated. On a second failure, show what it returned, note it, and still ask.
 - **Pass U returns no CHECK questions for a non-trivial change** → ask one yourself from its BEHAVIOR or NEW_PARTS: *in your own words, what does this change do, and which part of the system handles it?* Judge the answer against Pass U's text, not your own knowledge of the intent.
 - **The user answers "yes" or "I understand"** → not an answer. Ask the question again, in their own words.

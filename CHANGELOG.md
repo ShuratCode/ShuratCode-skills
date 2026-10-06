@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.26.0 — 2026-10-06
+
+### `fresh-review` 0.17.0 → 0.18.0: Excalidraw diagrams
+
+The class and sequence diagrams were Mermaid PNGs only. They now follow the user's diagram rules:
+Excalidraw first, Mermaid as the fallback.
+
+- **Excalidraw render.** `scripts/fr-diagrams.sh` uses gstack's offline `/diagram` pipeline. Each
+  diagram becomes an editable `.excalidraw` file, an SVG, and a PNG.
+- **Fallback.** No gstack bundle, no `bun`, or a render error → `mmdc`. Both fail → the Mermaid
+  fence goes to chat.
+- **Shown in Preview.** The PNGs open with `open`. `SendUserFile` only where `open` does not exist,
+  and `imgcat` when the user asks for the terminal.
+- **Class diagrams.** Excalidraw imports them as one image. The run says so.
+
 ## 0.25.0 — 2026-10-05
 
 ### `fresh-review` 0.16.0 → 0.17.0: a pinned model for each subagent
