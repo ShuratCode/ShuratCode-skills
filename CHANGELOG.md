@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.26.1 — 2026-10-07
+
+### `fresh-review` 0.18.0 → 0.18.1: diagrams show in the app
+
+The class and sequence PNGs opened in macOS Preview. When a user rule blocked `open`, the run
+printed only the PNG paths. Those paths are under `.git/worktrees/`, outside the session folder,
+so the desktop app could not open them, and the user saw no diagrams.
+
+- **Shown in the app.** The orchestrator sends each PNG with `SendUserFile` and
+  `display: "render"`: the class diagram first, then the sequence diagram. Nothing opens Preview.
+- **Terminal.** `imgcat` when the user asks for the terminal. In a plain CLI session without
+  `SendUserFile`, the run prints the paths and says once that `imgcat` shows them.
+- **Token rule kept.** `SendUserFile` does not put the image in the orchestrator's context, so the
+  rule against opening a PNG with Read still holds.
+
 ## 0.26.0 — 2026-10-06
 
 ### `fresh-review` 0.17.0 → 0.18.0: Excalidraw diagrams
