@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.27.0 — 2026-10-11
+
+### `fresh-review` 0.18.1 → 0.19.0: a flow diagram with the decisions
+
+The sequence diagram shows the happy path only. A reader could not see where the system makes a
+choice, or what happens on the other branch.
+
+- **Third diagram.** Pass U now also writes `FLOW_DIAGRAM`: a Mermaid `flowchart TD` from the
+  trigger to each outcome. Decisions are diamonds with labeled exits. New and changed nodes are
+  marked. At most ~12 nodes and ~4 decisions; `none` when the flow has no real decision.
+- **Rendered like the others.** `fr-diagrams.sh` renders `flow.mmd` in Excalidraw, with `mmdc` as
+  the fallback. The run shows it under **Decisions**, after the sequence diagram.
+- **Log.** `architecture.diagram` is now a comma-separated list (`class,sequence,flow`). Read an
+  earlier `both` as `class,sequence`.
+
 ## 0.26.1 — 2026-10-07
 
 ### `fresh-review` 0.18.0 → 0.18.1: diagrams show in the app

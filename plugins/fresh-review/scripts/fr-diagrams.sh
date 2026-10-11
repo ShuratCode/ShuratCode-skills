@@ -52,7 +52,7 @@ stage_bundle || STAGED=""
 
 echo "=== FRESH-REVIEW DIAGRAMS ==="
 echo "RENDERER: $([ -n "$STAGED" ] && echo excalidraw || echo mermaid)"
-for d in class sequence; do
+for d in class sequence flow; do
   if [ ! -f "$UI/$d.mmd" ]; then
     echo "DIAGRAM_$d: none"
     continue
