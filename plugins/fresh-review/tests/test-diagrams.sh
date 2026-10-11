@@ -57,11 +57,13 @@ run() { TMPDIR="$TMP" PATH="$FAKE_BIN:$PATH" "$@" bash "$SCRIPT" "$RUN"; }
 
 echo "fr-diagrams.sh"
 
-RUN=$(mkrun excalidraw "$GSTACK/bin" class sequence)
+RUN=$(mkrun excalidraw "$GSTACK/bin" class sequence flow)
 OUT=$(run env)
 want "$OUT" RENDERER excalidraw "gstack present"
 want "$OUT" DIAGRAM_class excalidraw "class renders with excalidraw"
 want "$OUT" DIAGRAM_sequence excalidraw "sequence renders with excalidraw"
+want "$OUT" DIAGRAM_flow excalidraw "flow renders with excalidraw"
+want "$OUT" PNG_flow "$RUN/ui/flow.png" "flow png path reported"
 want "$OUT" EDITABLE_sequence yes "clean render is editable"
 want "$OUT" EXCALIDRAW_class "$RUN/ui/class.excalidraw" "excalidraw path reported"
 [ -s "$RUN/ui/class.svg" ] && ok "svg written" || bad "svg written" "file" "missing"
@@ -71,6 +73,7 @@ OUT=$(run env FAKE_BUN=image)
 want "$OUT" DIAGRAM_class excalidraw "image-only scene still counts"
 want "$OUT" EDITABLE_class no "image-only scene is not editable"
 want "$OUT" DIAGRAM_sequence none "missing source is none"
+want "$OUT" DIAGRAM_flow none "missing flow source is none"
 
 RUN=$(mkrun parse-error "$GSTACK/bin" class)
 OUT=$(run env FAKE_BUN=error)
@@ -78,10 +81,11 @@ want "$OUT" DIAGRAM_class mermaid "excalidraw error falls back to mmdc"
 want "$OUT" PNG_class "$RUN/ui/class.png" "fallback png path reported"
 [ -z "$(key "$OUT" EXCALIDRAW_class)" ] && ok "no excalidraw path on fallback" || bad "no excalidraw path on fallback" "" "$(key "$OUT" EXCALIDRAW_class)"
 
-RUN=$(mkrun no-gstack "" sequence)
+RUN=$(mkrun no-gstack "" sequence flow)
 OUT=$(run env)
 want "$OUT" RENDERER mermaid "no gstack uses mermaid"
 want "$OUT" DIAGRAM_sequence mermaid "sequence renders with mmdc"
+want "$OUT" DIAGRAM_flow mermaid "flow renders with mmdc"
 
 RUN=$(mkrun all-fail "$GSTACK/bin" class)
 OUT=$(run env FAKE_BUN=error FAKE_MMDC=fail)
