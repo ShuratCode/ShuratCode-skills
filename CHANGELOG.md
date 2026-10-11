@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.27.1 — 2026-10-11
+
+### `second-brain` 0.1.1 → 0.1.2: topic and vocabulary hygiene in brain-lint
+
+- **Topic hygiene scan.** Lint reports unused, near-duplicate, and one-sided `Topics` options,
+  type tags that repeat database membership, wiki rows with no `Topics`, and the option count per
+  database with a warning above 90 (the API cannot add options past 100).
+- **Open-vocabulary selects.** The same checks cover Reading `Feed`, Podcasts `Show`, Watch
+  `Channel`, and Places `Region` and `Type`.
+- **Safe topic merges.** Re-tag rows with `notion-update-page`. Never delete an option or rewrite
+  an option list with `ALTER COLUMN SET`. Shaked deletes the empty options in the UI.
+- **Pipeline drift.** Done Podcasts or Watch rows with no Listened/Watched date are reported.
+
 ## 0.27.0 — 2026-10-11
 
 ### `fresh-review` 0.18.1 → 0.19.0: a flow diagram with the decisions

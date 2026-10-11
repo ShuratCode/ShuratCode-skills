@@ -46,11 +46,27 @@ to read rows) and look for:
 - **Pipeline drift** — rows sitting in `Awaiting ingest` (Reading, Podcasts, Watch) or `Ingest
   Queue` (Books); `Blocked` podcasts; Watch → `Blocked` videos (`Status` done, `Transcript` empty,
   `Has notes` off — say so if the view does not exist yet); `Has notes` disagreeing with the body.
+  Done Podcasts or Watch rows with no Listened/Watched date.
 - **False stamps** — rows that look ingested while the wiki has nothing from them. Run the same
   check as brain-sweep: read each raw database's stamped view in **view mode** (Reading, Podcasts,
   and Watch `Ingested`; Books `Digested`), page with `next_cursor`, and keep rows where `Verdict` is
   `keep` or `reference` and `Literature` is empty. `skip` rows are fine. Report each one under
   **Pipeline health** with its link, `Captured by`, and `Ingested` date. Never auto-clear a stamp.
+- **Topic hygiene** — Zettels and Literature `Topics`, and the open-vocabulary selects on raw rows
+  (Reading `Feed`, Podcasts `Show`, Watch `Channel`, Places `Region` and `Type`). Report:
+  - unused options (count 0), per database;
+  - near-duplicate options (spelling variants, synonyms, AWS-prefixed vs plain), each with the row
+    count on both sides and a suggested survivor;
+  - options that exist in only one of Zettels and Literature;
+  - type tags that duplicate database membership or `Source type` / `Verdict` (for example
+    blog-post, how-to, podcast, reference);
+  - wiki rows with no `Topics`;
+  - the option count per database — **warn above 90**. The API can't add options past 100; after
+    that, new options need the Notion UI.
+
+  To count, run one single-source SQL query per database with a batch of `LIKE '%"name"%'`
+  clauses, or `SELECT Topics` once and count in your reasoning. The Free plan meters SQL and rows
+  mode and refuses multi-source queries, so keep it to about two or three SQL calls per lint run.
 
 Also suggest **new questions to investigate** and **sources to look for** — gaps worth filling.
 
@@ -74,6 +90,9 @@ Treat approved items as a normal edit pass under the Handbook's permissions:
   Notion's trash counts as delete (guardrail 4).
 - **Orphans** — prefer wiring them into a `moc` row over scattering many relation edits.
 - **Missing concept rows** — create the row as a proper Zettel with a `Source` and `Related`.
+- **Topic merges** — re-tag each row with `notion-update-page`. Never delete an option, and never
+  use `ALTER COLUMN SET` to rewrite an option list: it drops every option you leave out. Hand Shaked
+  the list of now-empty options to delete in the UI, then verify by fetching the data source.
 - Never change a raw row's `Status` or `Verdict` (guardrail 6).
 
 ## Don't re-raise rejected items
