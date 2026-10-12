@@ -51,6 +51,21 @@ else
   bad "script refs rewritten to repo-root form"
 fi
 
+# 1b. Every reference file is vendored, with no ${CLAUDE_PLUGIN_ROOT} left.
+SRC_REFS="$HERE/../skills/fresh-review/references"
+rmissing=0; rleft=0; rtotal=0
+for f in "$SRC_REFS"/*.md; do
+  [ -e "$f" ] || continue
+  rtotal=$((rtotal + 1))
+  out="$TARGET/references/$(basename "$f")"
+  [ -f "$out" ] || { rmissing=$((rmissing + 1)); continue; }
+  grep -q 'CLAUDE_PLUGIN_ROOT' "$out" && rleft=$((rleft + 1))
+done
+check "all $rtotal references/*.md present in output" "$([ "$rtotal" -gt 0 ] && [ "$rmissing" -eq 0 ] && echo 1 || echo 0)"
+check "zero \${CLAUDE_PLUGIN_ROOT} in output references ($rleft files)" "$([ "$rleft" -eq 0 ] && echo 1 || echo 0)"
+r=$(grep -c 'git rev-parse --show-toplevel)/.claude/skills/fresh-review/references' "$SKILL" || true)
+check "reference dir rewritten to repo-root form ($r found)" "$([ "$r" -gt 0 ] && echo 1 || echo 0)"
+
 # 2. Every fr-*.sh from the source is present in the output and executable.
 SRC_SCRIPTS="$HERE/../scripts"
 missing=0; nonexec=0; total=0
