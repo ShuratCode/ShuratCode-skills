@@ -22,6 +22,7 @@ command -v python3 >/dev/null || { echo "vendor: python3 required" >&2; exit 2; 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_SKILL="$PLUGIN_ROOT/skills/fresh-review/SKILL.md"
+SRC_REFS="$PLUGIN_ROOT/skills/fresh-review/references"
 SRC_SCRIPTS="$PLUGIN_ROOT/scripts"
 MANIFEST="$PLUGIN_ROOT/.claude-plugin/plugin.json"
 
@@ -31,26 +32,38 @@ MANIFEST="$PLUGIN_ROOT/.claude-plugin/plugin.json"
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST")"
 SHA="$(git -C "$PLUGIN_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
-mkdir -p "$TARGET/scripts"
+rm -rf "$TARGET/references"
+mkdir -p "$TARGET/scripts" "$TARGET/references"
 
-# 1. SKILL.md — drop the plugin-only Step 0 bootstrap block, then rewrite every
-#    ${CLAUDE_PLUGIN_ROOT}/scripts/ reference so the vendored scripts resolve from
-#    the repo root with no CLAUDE_PLUGIN_ROOT. The bootstrap block resolves
-#    CLAUDE_PLUGIN_ROOT for plugin installs; a vendored copy has no plugin root
-#    (its refs become repo-root paths) and the block's bare CLAUDE_PLUGIN_ROOT
-#    mentions would otherwise survive the rewrite, which only touches the
-#    `${CLAUDE_PLUGIN_ROOT}/scripts/` form. Prose mentions of ~/.claude/skills/...
+# 1. SKILL.md and references/*.md — drop the plugin-only Step 0 bootstrap block,
+#    then rewrite every ${CLAUDE_PLUGIN_ROOT}/scripts/ and
+#    ${CLAUDE_PLUGIN_ROOT}/skills/fresh-review/ reference so the vendored copy
+#    resolves from the repo root with no CLAUDE_PLUGIN_ROOT. The bootstrap block
+#    resolves CLAUDE_PLUGIN_ROOT for plugin installs; a vendored copy has no
+#    plugin root (its refs become repo-root paths) and the block's bare
+#    CLAUDE_PLUGIN_ROOT mentions would otherwise survive the rewrite, which only
+#    touches those two prefixed forms. Prose mentions of ~/.claude/skills/...
 #    (gstack/cso/ship) are left as-is: full-tier consumers have gstack.
-REWRITES="$(python3 - "$SRC_SKILL" "$TARGET/SKILL.md" <<'PY'
-import re, sys
-src, dst = sys.argv[1], sys.argv[2]
-text = open(src).read()
-text = re.sub(r'\n*<!-- FR:BOOTSTRAP:START -->.*?<!-- FR:BOOTSTRAP:END -->\n*',
-              '\n\n', text, flags=re.DOTALL)
-search = '${CLAUDE_PLUGIN_ROOT}/scripts/'
-replace = '$(git rev-parse --show-toplevel)/.claude/skills/fresh-review/scripts/'
-print(text.count(search))
-open(dst, "w").write(text.replace(search, replace))
+REWRITES="$(python3 - "$SRC_SKILL" "$TARGET/SKILL.md" "$SRC_REFS" "$TARGET/references" <<'PY'
+import pathlib, re, sys
+src, dst, src_refs, dst_refs = sys.argv[1:5]
+repo = '$(git rev-parse --show-toplevel)/.claude/skills/fresh-review/'
+pairs = [('${CLAUDE_PLUGIN_ROOT}/scripts/', repo + 'scripts/'),
+         ('${CLAUDE_PLUGIN_ROOT}/skills/fresh-review/', repo)]
+def vendor(a, b):
+    text = pathlib.Path(a).read_text()
+    text = re.sub(r'\n*<!-- FR:BOOTSTRAP:START -->.*?<!-- FR:BOOTSTRAP:END -->\n*',
+                  '\n\n', text, flags=re.DOTALL)
+    n = 0
+    for search, replace in pairs:
+        n += text.count(search)
+        text = text.replace(search, replace)
+    pathlib.Path(b).write_text(text)
+    return n
+total = vendor(src, dst)
+for ref in sorted(pathlib.Path(src_refs).glob("*.md")):
+    total += vendor(ref, pathlib.Path(dst_refs) / ref.name)
+print(total)
 PY
 )"
 
@@ -69,6 +82,7 @@ printf '%s  %s\n' "$VERSION" "$SHA" > "$TARGET/.fresh-review-version"
 
 echo "fresh-review vendored -> $TARGET"
 echo "  version:  $VERSION  ($SHA)"
-echo "  SKILL.md: $REWRITES script ref(s) rewritten to repo-root paths"
+echo "  SKILL.md: $REWRITES plugin-root ref(s) rewritten to repo-root paths"
+echo "  refs:     $(ls "$TARGET/references" | wc -l | tr -d ' ') references/*.md copied"
 echo "  scripts:  $COUNT fr-*.sh copied (executable)"
 echo "  stamp:    $TARGET/.fresh-review-version"

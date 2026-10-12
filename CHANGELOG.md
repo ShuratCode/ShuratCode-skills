@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.28.0 — 2026-10-12
+
+### `fresh-review` 0.19.0 → 0.20.0: a smaller skill file
+
+SKILL.md was 179k characters, and every run loaded all of it. Most of it was for modes and
+passes the run did not use, or explained design choices to a maintainer.
+
+- **Mode and pass rules on demand.** Stack mode, pr-remote, re-review (with Pass F), Pass K,
+  Pass R, Pass W, Codex, and the run-log shape moved to `skills/fresh-review/references/`. A
+  step reads a file only when the run needs it. SKILL.md is now 103k; a default review of your
+  own branch reads only `run-log.md` on top, at the end.
+- **Design reasons out of the run.** The "why" sections and the run-log schema history moved to
+  `DESIGN.md`, which no run reads. SKILL.md keeps each rule in one line.
+- **Fewer repeats.** Failure modes that repeated a step were dropped, and the Configuration list
+  was cut to what the Modes section does not say.
+- **Vendoring.** `vendor.sh` copies `references/*.md` and rewrites their plugin-root paths too.
+
 ## 0.27.1 — 2026-10-11
 
 ### `second-brain` 0.1.1 → 0.1.2: topic and vocabulary hygiene in brain-lint
