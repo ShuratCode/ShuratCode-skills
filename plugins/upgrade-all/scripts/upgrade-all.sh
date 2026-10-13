@@ -111,8 +111,8 @@ fi
 # ---------------------------------------------------------------------------
 # 3) Claude plugins
 #
-# Update loop: enumerate whatever `claude plugins list` reports and update each
-# one, so the set is never a stale hardcoded list — a newly installed plugin is
+# Update loop: enumerate whatever `claude plugins list --json` reports and update
+# each one, so the set is never a stale hardcoded list — a newly installed plugin is
 # picked up automatically. `upgrade-all` updates itself last: a new version
 # installs into a sibling directory (cache/<mkt>/<plugin>/<version>/) rather
 # than overwriting the running script, but keeping it last avoids any question
@@ -122,24 +122,74 @@ fi
 # marketplace, so a newly published one surfaces instead of staying invisible.
 # ---------------------------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
-  logrun "claude plugins marketplace update" claude plugins marketplace update || true
+  MKT_FAILED=0
+  STALE_MKTS=""
+  logrun "claude plugins marketplace update" claude plugins marketplace update || MKT_FAILED=1
 
-  # Installed ids as `name@marketplace`, one per line. Text parse keeps the
-  # update loop working even where jq is absent.
-  INSTALLED_IDS=$(claude plugins list 2>/dev/null | grep '@' | awk '{print $NF}')
+  HAVE_JQ=0
+  command -v jq >/dev/null 2>&1 && HAVE_JQ=1
+
+  list_plugins() {
+    local rows=""
+    if [ "$HAVE_JQ" -eq 1 ]; then
+      rows=$(claude plugins list --json 2>/dev/null | jq -r '
+        (if type == "array" then . else .installed end)[]
+        | select((.installPath // "") != "")
+        | [.id, (.version // "unknown"), (.scope // "")] | @tsv' 2>/dev/null)
+    fi
+    if [ -z "$rows" ]; then
+      rows=$(claude plugins list 2>/dev/null | awk '
+        function flush() { if (id != "") print id "\t" ver "\t" sc; id = "" }
+        $1 == "❯" && NF == 2 && $2 ~ /^[^@]+@[^@]+$/ {
+          flush(); id = $2; ver = "unknown"; sc = (id ~ /@synced$/) ? "synced" : "local"; next
+        }
+        $1 == "Version:" && id != "" { ver = $2 }
+        END { flush() }')
+    fi
+    printf '%s\n' "$rows" | awk -F'\t' 'NF >= 2 && !seen[$1]++'
+  }
+
+  version_of() { # id  rows
+    printf '%s\n' "$2" | awk -F'\t' -v id="$1" '$1 == id { print $2; exit }'
+  }
+
+  PLUGINS=$(list_plugins)
+  INSTALLED_IDS=$(printf '%s\n' "$PLUGINS" | awk -F'\t' '$3 != "synced" { print $1 }')
+  SYNCED_IDS=$(printf '%s\n' "$PLUGINS" | awk -F'\t' '$3 == "synced" { print $1 }')
   SELF_ID=$(printf '%s\n' "$INSTALLED_IDS" | grep -E '^upgrade-all@' | head -1)
 
   update_plugin() { # id
-    local id="$1" name="${1%%@*}" out rc
+    local id="$1" name="${1%%@*}" out rc old new moved stale
     echo "### claude plugins update $id" >> "$LOG"
     out=$(claude plugins update "$id" 2>&1); rc=$?
     printf '%s\n' "$out" >> "$LOG"
+
+    stale=$(printf '%s' "$out" | sed -n "s/.*Failed to refresh marketplace '\([^']*\)'.*/\1/p" | head -1)
+    if [ -n "$stale" ]; then
+      case " $STALE_MKTS " in
+        *" $stale "*) ;;
+        *) STALE_MKTS="${STALE_MKTS:+$STALE_MKTS }$stale" ;;
+      esac
+    fi
+
     if [ "$rc" -ne 0 ]; then
       add "$name" "FAILED" "update $id failed"
-    elif printf '%s' "$out" | grep -qiE "already|up to date|up-to-date|no update"; then
-      add "$name" "CURRENT" "$id"
+      return
+    fi
+
+    moved=$(printf '%s' "$out" | sed -n 's/.* updated from \([^ ]*\) to \([^ ]*\).*/\1 \2/p' | head -1 | sed 's/\.$//')
+    old="${moved%% *}"
+    new="${moved#* }"
+    if [ -z "$moved" ]; then
+      old=$(version_of "$id" "$PLUGINS")
+      new=$(printf '%s' "$out" | sed -n 's/.*latest version (\([^)]*\)).*/\1/p' | head -1)
+    fi
+
+    if printf '%s' "$out" | grep -qiE "already|up to date|up-to-date|no update"; then
+      add "$name" "CURRENT" "${new:-${old:-unknown}} ($id)"
     else
-      add "$name" "UPGRADED" "$id"
+      [ -z "$new" ] && new=$(version_of "$id" "$(list_plugins)")
+      add "$name" "UPGRADED" "${old:-unknown} → ${new:-unknown} ($id)"
     fi
   }
 
@@ -157,6 +207,15 @@ if command -v claude >/dev/null 2>&1; then
     [ -n "$SELF_ID" ] && update_plugin "$SELF_ID"
   fi
 
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    add "${id%%@*}" "SKIPPED" "synced from claude.ai, manage it there ($id)"
+  done < <(printf '%s\n' "$SYNCED_IDS")
+
+  if [ "$MKT_FAILED" -eq 1 ] || [ -n "$STALE_MKTS" ]; then
+    add "marketplace" "FAILED" "refresh failed${STALE_MKTS:+ for $STALE_MKTS}, versions may be stale"
+  fi
+
   # ---- available-but-not-installed, scoped to this plugin's marketplace -----
   HOME_MKT="${SELF_ID#*@}"
   [ "$HOME_MKT" = "$SELF_ID" ] && HOME_MKT=""   # no '@' in SELF_ID means no match
@@ -167,7 +226,7 @@ if command -v claude >/dev/null 2>&1; then
 
   if [ -z "$HOME_MKT" ]; then
     add "new-plugins" "SKIPPED" "could not determine home marketplace"
-  elif ! command -v jq >/dev/null 2>&1; then
+  elif [ "$HAVE_JQ" -eq 0 ]; then
     add "new-plugins" "SKIPPED" "jq not installed (needed to diff available plugins)"
   else
     AVAIL_JSON=$(claude plugins list --available --json 2>/dev/null)

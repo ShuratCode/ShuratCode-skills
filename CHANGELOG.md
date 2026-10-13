@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.28.1 — 2026-10-13
+
+### `upgrade-all` 0.6.0 → 0.6.1: parse the plugin list as JSON, skip synced plugins, show versions
+
+The daily run showed three `precedence: FAILED` lines and two `@synced` FAILED lines, and the
+UPGRADED lines had no versions.
+
+- **JSON discovery.** The plugin list now comes from `claude plugins list --json`. The text
+  parse read the last word of each line with `@`, so the "Synced from claude.ai" warnings
+  became a fake `precedence` id. The text fallback (no jq) now accepts only `❯ name@marketplace`
+  lines.
+- **Synced plugins.** `@synced` plugins come from the claude.ai account and cannot be updated
+  here. Each loaded one gets `SKIPPED — synced from claude.ai, manage it there`. A synced
+  plugin that a local install shadows gets no line.
+- **Versions.** `UPGRADED — 0.19.0 → 0.20.0 (fresh-review@ShuratCode-skills)` and
+  `CURRENT — 0.20.0 (id)`. The skill now relays both versions.
+- **Stale marketplace.** A failed `claude plugins marketplace update`, or a per-plugin
+  "marketplace not refreshed" warning, adds `marketplace: FAILED — refresh failed …, versions
+  may be stale`. Before, this showed only in the log.
+- **Not done: per-plugin CHANGES lines.** The marketplace clones are shallow (one commit), so
+  a commit list needs a network fetch on each run, and the CHANGELOG formats differ per
+  marketplace.
+
 ## 0.28.0 — 2026-10-12
 
 ### `fresh-review` 0.19.0 → 0.20.0: a smaller skill file
