@@ -26,8 +26,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-all.sh"
 The script runs, in order: Homebrew (update/upgrade/cask/cleanup/autoremove), gstack
 (inline non-interactive git upgrade + migrations), and the `claude plugins` updates. The
 plugin step is a discovery loop: it enumerates every installed plugin from `claude plugins
-list` and updates each (`upgrade-all` self last), so no plugin is ever missed because a
-hardcoded list went stale. It then reports any plugin that is available in this plugin's own
+list --json` and updates each (`upgrade-all` self last), so no plugin is ever missed because a
+hardcoded list went stale. Plugins synced from claude.ai (`@synced`) cannot be updated here, so
+the script skips them. It then reports any plugin that is available in this plugin's own
 marketplace but not installed yet. It prints exactly one `=== UPGRADE-ALL SUMMARY ===` block
 and writes verbose per-step output to a log file.
 
@@ -37,6 +38,13 @@ Read only the SUMMARY block from the script's stdout. Each line is
 `component: STATUS — detail`, where STATUS is `UPGRADED`, `CURRENT`, `SKIPPED`, `FAILED`, or
 `AVAILABLE`. Relay it to the user as a concise summary covering brew, gstack, and each
 Claude Code plugin the loop touched.
+
+- An `UPGRADED` plugin line reads `old → new (id)`. Always relay both versions, for example
+  "fresh-review 0.19.0 → 0.20.0". A `CURRENT` plugin line reads `version (id)`.
+- A `SKIPPED — synced from claude.ai` line is expected, not a failure. The plugin is managed
+  on claude.ai. Mention it in one short line, or group these lines together.
+- A `marketplace: FAILED` line means the marketplace refresh failed, so the versions may be
+  stale. Say so, so the user does not read "CURRENT" as "latest".
 
 - Do **not** re-run the individual upgrade commands — the script already did everything.
 - An `AVAILABLE` line is a plugin published in the marketplace but not installed yet; the
