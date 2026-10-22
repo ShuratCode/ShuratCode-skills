@@ -13,7 +13,7 @@ A stack is a chain of PRs where each PR's base branch is the head branch of the 
 
 **A stack of one PR is not handed off.** There is nothing to plan, so the script says `NEXT: review_here` and the review runs in this session as a normal `--pr` review.
 
-**Why a new session per unit, and not subagents here** (stacks of two or more PRs). This session has read the PR titles and the plan. A review producer that knows the author's claims triages with that bias, and a review is itself a full orchestration — its own subagents, its own understanding check, its own questions to the user. One session per unit keeps each review blind to the others and gives each one its own context budget.
+**Why a new session per unit, and not subagents here** (stacks of two or more PRs). This session has read the PR titles and the plan. A review producer that knows the author's claims triages with that bias, and a review is itself a full orchestration — its own subagents, its own risk tier, its own stop for approval on a high tier. One session per unit keeps each review blind to the others and gives each one its own context budget.
 
 **The grouping rules** (in `fr-stack.sh`, applied bottom to top). A PR joins the unit below it only when **all** of these hold:
 
@@ -57,7 +57,7 @@ On `STACK: resolved` with `NEXT: handoff`, print the plan, then the handoffs, an
 
    `<verdict>` is the unit's verdict (`APPROVE`, `APPROVE-WITH-COMMENTS`, `REQUEST-CHANGES`, `ARCH-PENDING`) or `SKIPPED`. A unit may be reported again — after fixes, the new verdict replaces the old one. With no unit, the script only prints the status. Then print the status as a short table (unit, PRs, verdict, blockers), then `Stack: <STACK_VERDICT> (<REPORTED> reported)`.
 
-   `STACK_VERDICT` is `REQUEST-CHANGES` as soon as one unit has it, `pending` while any unit is unreported or waits on its understanding check, `INCOMPLETE` when all reported but one was skipped, and otherwise the weakest verdict of the units. When the stack is complete, name the PRs that still carry blockers. The script only records what the user reports: never read a unit's run directory, and never fill in a verdict nobody reported.
+   `STACK_VERDICT` is `REQUEST-CHANGES` as soon as one unit has it, `pending` while any unit is unreported or waits for architecture approval, `INCOMPLETE` when all reported but one was skipped, and otherwise the weakest verdict of the units. When the stack is complete, name the PRs that still carry blockers. The script only records what the user reports: never read a unit's run directory, and never fill in a verdict nobody reported.
 
    `REASON` on an error is `no_stack_status` (wrong run directory), `no_such_unit`, `bad_verdict`, or `bad_blockers`. Ask the user to correct the report.
 
@@ -67,8 +67,8 @@ Rules for this step:
 
 - **Do not change the plan by hand.** The grouping is mechanical so that it is the same on every run and testable. If the user wants a different split, they say so and you re-run with the refs they want (`--stack "41,42"` and `--stack "43"`, for example).
 - **Do not add to the handoffs.** No PR titles, no summary of what a PR does, no view on the code. The handoff carries scope and mechanics only. Anything more reaches the review producer as the author's claim, and the next review triages against it.
-- **The units are independent.** They may run in any order or at the same time. Each one runs its own understanding check, and stops to ask.
-- **`--codex` and `--army` carry over** to every handoff when this run had them. `--understood` never does: each unit's check is its own.
+- **The units are independent.** They may run in any order or at the same time. Each one sets its own risk tier, and stops for approval on a high tier.
+- **`--codex` and `--army` carry over** to every handoff when this run had them. `--understood` never does: each unit's approval is its own.
 - **A re-review keeps the unit as planned.** Do not re-plan the stack to re-review one unit. If the user restacked and a re-review handoff fails with `since_pr_not_below`, re-run the orchestrator.
 
 ## Failure modes
@@ -82,6 +82,6 @@ Rules for this step:
 
 ## Examples
 
-**"review the stack for PR 43"** → `--stack "43"`. Step S plans the units and prints one handoff per unit. Each unit runs its own understanding check in its own session.
+**"review the stack for PR 43"** → `--stack "43"`. Step S plans the units and prints one handoff per unit. Each unit sets its own risk tier in its own session.
 
 **"re-review unit 2"** in the orchestrator session → Step S prints `unit-2-rereview.md`. The user pastes it in a new session; its `STACK REPORT` line replaces unit 2's old verdict.

@@ -58,6 +58,13 @@ if [ "$RISK" = high ] && [ "$CODEX_REQUESTED" != 1 ]; then
   CODEX_REASON=risk
 fi
 
+BEFORE_REV="${DIFF_BASE:-}"
+if [ "$REVIEW_SCOPE" = working ]; then
+  BEFORE_REV=HEAD
+  [ "${CHECKPOINT:-}" = committed ] && BEFORE_REV=HEAD~1
+fi
+BEFORE_REV=$(git -C "${SOURCE_ROOT:-.}" rev-parse --verify --quiet "${BEFORE_REV:-HEAD}^{commit}" 2>/dev/null || echo "")
+
 {
   echo "SCOPE=$REVIEW_SCOPE"
   echo "DIFF_CMD=$DIFF_CMD"
@@ -65,6 +72,7 @@ fi
   echo "DIFF_BASE=$DIFF_BASE"
   echo "CHECKPOINT=$CHECKPOINT_SHA"
   echo "RISK=$RISK"
+  echo "BEFORE_REV=$BEFORE_REV"
   # Where a reviewer must open source files from. Only ever differs from the
   # user's checkout in pr-remote mode, and there getting it wrong means judging
   # the PR against a different commit's file contents.

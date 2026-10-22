@@ -66,7 +66,7 @@ def run_dir_of(run_id):
     return None
 
 def architecture_in(run_dir):
-    for name in ("understanding.md", "architecture.md"):
+    for name in ("architecture.md", "understanding.md"):
         path = os.path.join(run_dir, "raw", name) if run_dir else None
         if regular_file(path):
             return path

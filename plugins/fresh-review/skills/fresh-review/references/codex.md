@@ -1,6 +1,6 @@
 # fresh-review — Codex (Pass C)
 
-Read this at Step 5 when `CODEX_REQUESTED: 1` and `HAS_CODEX: 1`, or at Step 6 when Pass K raised the risk. Keep it for the rest of the run: Steps 6 and 8.5 use it.
+Read this at Step 5 when `CODEX_REQUESTED: 1` and `HAS_CODEX: 1`. Keep it for the rest of the run: Steps 6 and 8.5 use it.
 
 ## Step 5: launch Pass C
 

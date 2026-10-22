@@ -294,7 +294,7 @@ def handoff_text(unit, k, units, rereview=False):
         "Rules for this session",
         "- The flags on the first line are final. Run the full fresh-review flow with them. "
         "This is not a stack request.",
-        "- The understanding check applies to this unit on its own.",
+        "- The risk tier and any stop for architecture approval apply to this unit on its own.",
         "- Keep this handoff out of every reviewer subagent. Reviewers get the packet only.",
         "- A later PR in the stack may change this code. A finding still counts here: "
         "it belongs to the PR that adds the code.",

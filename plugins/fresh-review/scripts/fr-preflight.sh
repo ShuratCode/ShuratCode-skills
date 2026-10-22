@@ -3,10 +3,9 @@
 # Probes the repo, resolves the review scope, creates the run directory, and
 # writes the state file every later script reads.
 #
-# --mode selects the output shape: `review` is findings only, `pr` adds the
-# narrative pass. --pr implies --mode pr and additionally moves the subject of
-# the review off the local branch, at which point scope resolution is finished by
-# fr-pr-resolve.sh rather than here.
+# --mode pr is accepted and runs the same flow as the default. --pr implies
+# --mode pr and moves the subject of the review off the local branch, at which
+# point scope resolution is finished by fr-pr-resolve.sh rather than here.
 #
 # --codex opts the run into the cross-model Codex pass (Pass C). It is off by
 # default: Codex runs only when the invocation explicitly asks for it, and only

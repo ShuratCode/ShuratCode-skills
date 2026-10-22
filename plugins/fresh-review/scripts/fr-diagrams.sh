@@ -25,23 +25,37 @@ stage_bundle() {
     || { cp "$BUNDLE" "$STAGED.$$" && mv "$STAGED.$$" "$STAGED"; }
 }
 
-render_excalidraw() {
-  local d="$1" src out
+bun_render() {
+  local log="$1"; shift
+  local out
+  out=$(bun run "$RENDER" "$STAGED" --wait-selector '#done' "$@" 2>&1)
+  printf '%s\n' "$out" >> "$log"
+  ! printf '%s\n' "$out" | grep -q '^ERROR'
+}
+
+render_scene() {
+  local d="$1" src
   [ -n "$STAGED" ] || return 1
   src=$(base64 < "$UI/$d.mmd" | tr -d '\n')
-  out=$(bun run "$RENDER" "$STAGED" --wait-selector '#done' \
-    --eval "window.__renderMermaid('$d', decodeURIComponent(escape(atob('$src')))).then(s => (window.__svg = s))" --out "$UI/$d.svg" \
+  : > "$UI/$d.render.log"
+  bun_render "$UI/$d.render.log" \
+    --eval "window.__mermaidToExcalidraw(decodeURIComponent(escape(atob('$src')))).then(j => (window.__scene = j))" --out "$UI/$d.excalidraw" \
+    && [ -s "$UI/$d.excalidraw" ]
+}
+
+render_scene_png() {
+  local d="$1" scene
+  scene=$(base64 < "$UI/$d.excalidraw" | tr -d '\n')
+  bun_render "$UI/$d.render.log" \
+    --eval "window.__excalidrawToSvg(decodeURIComponent(escape(atob('$scene')))).then(s => (window.__svg = s))" --out "$UI/$d.svg" \
     --eval "window.__rasterize(window.__svg, 1950)" --out "$UI/$d.png" \
-    --eval "window.__mermaidToExcalidraw(decodeURIComponent(escape(atob('$src')))).then(j => (window.__scene = j))" --out "$UI/$d.excalidraw" 2>&1)
-  printf '%s\n' "$out" > "$UI/$d.render.log"
-  printf '%s\n' "$out" | grep -q '^ERROR' && return 1
-  [ -s "$UI/$d.png" ] && [ -s "$UI/$d.excalidraw" ]
+    && [ -s "$UI/$d.png" ]
 }
 
 render_mermaid() {
   local d="$1"
   command -v mmdc >/dev/null 2>&1 || return 1
-  mmdc -i "$UI/$d.mmd" -o "$UI/$d.png" > "$UI/$d.mmdc.log" 2>&1 && [ -s "$UI/$d.png" ]
+  mmdc -i "$UI/$d.mmd" -o "$UI/$d.png" -b white -s 2 > "$UI/$d.mmdc.log" 2>&1 && [ -s "$UI/$d.png" ]
 }
 
 editable() {
@@ -52,22 +66,28 @@ stage_bundle || STAGED=""
 
 echo "=== FRESH-REVIEW DIAGRAMS ==="
 echo "RENDERER: $([ -n "$STAGED" ] && echo excalidraw || echo mermaid)"
-for d in class sequence flow; do
+for d in before after; do
   if [ ! -f "$UI/$d.mmd" ]; then
     echo "DIAGRAM_$d: none"
     continue
   fi
   rm -f "$UI/$d.png" "$UI/$d.svg" "$UI/$d.excalidraw"
-  if render_excalidraw "$d"; then
+  SCENE=no; EDIT=no
+  if render_scene "$d"; then
+    SCENE=yes; EDIT=$(editable "$d")
+  fi
+  if [ "$EDIT" = yes ] && render_scene_png "$d"; then
     echo "DIAGRAM_$d: excalidraw"
     echo "PNG_$d: $UI/$d.png"
-    echo "EXCALIDRAW_$d: $UI/$d.excalidraw"
-    echo "EDITABLE_$d: $(editable "$d")"
   elif render_mermaid "$d"; then
     echo "DIAGRAM_$d: mermaid"
     echo "PNG_$d: $UI/$d.png"
   else
     echo "DIAGRAM_$d: failed"
+  fi
+  if [ "$SCENE" = yes ]; then
+    echo "EXCALIDRAW_$d: $UI/$d.excalidraw"
+    echo "EDITABLE_$d: $EDIT"
   fi
 done
 echo "=== END ==="
