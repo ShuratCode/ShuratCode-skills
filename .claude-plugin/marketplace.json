@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "ShuratCode-skills",
   "description": "Shaked Eyal's personal skills for Claude Code and Claude Desktop (Cowork).",
-  "version": "0.28.1",
+  "version": "0.29.0",
   "owner": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"
@@ -14,7 +14,7 @@
     {
       "name": "fresh-review",
       "source": "./plugins/fresh-review",
-      "description": "Understand-first, fresh-eyes code review: it explains the change at a high level (the system in brief, behavior before and now, how it fits, a UML class diagram, a sequence diagram, a flow diagram with the decision points, the alternatives), checks with open questions that you know what the change is, then reviews the implementation with context-isolated subagents — a fast implementation pass and the gstack security audit, lattice only when the feature has a lattice context, Codex on request or on high-risk diffs. Findings print the code they want to change, block only with a concrete failure, and the added comments are listed to drop. PR mode adds a risk class; the gstack review army is opt-in (--army); stack mode plans the reviews of a PR stack; a re-review (--delta) reviews only what changed since the last review and checks the earlier blockers.",
+      "description": "Architect-first, fresh-eyes code review: an isolated pass sets an architecture risk tier — low runs the code review on its own; medium and high get a short brief (before and after diagrams in DDD language with no class names, up to two paragraphs, and the PR's screenshots when the UI changed), and high waits for your go. The code review uses context-isolated subagents — a fast implementation pass and the gstack security audit, lattice only when the feature has a lattice context, Codex on request or on high-risk changes. Findings are plain sentences in chat, with the diffs in report.md, and block only with a concrete failure. The gstack review army is opt-in (--army); stack mode plans the reviews of a PR stack; a re-review (--delta) reviews only what changed since the last review and checks the earlier blockers.",
       "category": "code-review",
       "keywords": [
         "review",

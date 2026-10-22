@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.29.0 — 2026-10-22
+
+### `fresh-review` 0.20.0 → 0.21.0: an architect-first review
+
+The user reads architecture, not code. Every run explained the change and asked open questions
+before any review, even when nothing in the architecture moved.
+
+- **Risk tier first.** Pass U now sets one tier from the code alone. `low` (no architecture
+  change) prints one line and runs the code review with no stop. `medium` (a change inside one
+  bounded context) prints a brief and runs the code review in the same turn. `high` (a change
+  across a boundary, or one that is hard to undo) prints the brief and waits for "go". An
+  objection to the design ends the run with no code review. `--understood` skips the stop.
+- **The brief.** A before and an after diagram in DDD language (bounded contexts, aggregates,
+  services, events, stores, outside systems — no class, function, or file names), rendered in
+  Excalidraw; at most two paragraphs on what changed; and, when the UI changed, the screenshots
+  from the PR description. The app is still never launched. `fr-ui-images.sh` downloads images
+  from GitHub's attachment hosts only and keeps only real image files.
+- **Diagram PNG fix.** `fr-diagrams.sh` rasterized Mermaid's SVG directly, which drew flowcharts
+  as black boxes with no labels. The PNG now comes from the Excalidraw scene when it is editable,
+  and from `mmdc` otherwise (bounded-context subgraphs import into Excalidraw as one image).
+- **Plain findings.** Chat shows the verdict and one plain sentence per finding, with a link to
+  the location. The diffs and the comment list moved to `report.md`. On your own branch the
+  review ends with an offer to fix the findings.
+- **Removed.** The understanding check and its questions, the class, sequence, and flow
+  diagrams, the alternatives list, and Pass K (its `low`/`med`/`high` class is now the tier). A
+  high tier makes Codex a must (`CODEX_REASON=tier`).
+- **Run log** `schema:14`: `architecture.tier`, new gate values (`auto`, `shown`, `rejected`),
+  `ui` replaces `ui_preview`. See `DESIGN.md`.
+
 ## 0.28.1 — 2026-10-13
 
 ### `upgrade-all` 0.6.0 → 0.6.1: parse the plugin list as JSON, skip synced plugins, show versions

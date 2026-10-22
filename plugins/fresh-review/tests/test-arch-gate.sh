@@ -24,7 +24,7 @@ gate() {
   bash "$SCRIPTS/fr-arch-gate.sh" "$dir"
 }
 
-printf '\n\033[1mfresh-review understanding gate\033[0m\n'
+printf '\n\033[1mfresh-review architecture gate\033[0m\n'
 
 OUT="$(gate undecided "ARCH_APPROVED='0'")"
 want "$OUT" ARCH_GATE closed "no gate outcome recorded"
@@ -46,8 +46,16 @@ OUT="$(gate carried "ARCH_APPROVED='0'" "ARCH_GATE='carried'")"
 want "$OUT" ARCH_GATE open "approval carried from the last review"
 want "$OUT" REASON approved_at_last_review "approval carried from the last review"
 
-OUT="$(gate notneeded "ARCH_APPROVED='0'" "ARCH_GATE='not_needed'")"
-want "$OUT" ARCH_GATE open "no architecture decisions"
+OUT="$(gate auto "ARCH_APPROVED='0'" "ARCH_GATE='auto'")"
+want "$OUT" ARCH_GATE open "low tier runs on its own"
+want "$OUT" REASON no_architecture_change "low tier runs on its own"
+
+OUT="$(gate shown "ARCH_APPROVED='0'" "ARCH_GATE='shown'")"
+want "$OUT" ARCH_GATE open "medium tier shows the brief and goes on"
+want "$OUT" REASON brief_shown "medium tier shows the brief and goes on"
+
+OUT="$(gate flagrejected "ARCH_APPROVED='1'" "ARCH_GATE='rejected'")"
+want "$OUT" ARCH_GATE closed "a rejected design stays closed even with --understood"
 
 OUT="$(gate failed "ARCH_APPROVED='0'" "ARCH_GATE='failed'")"
 want "$OUT" ARCH_GATE open "detector failed"
@@ -56,12 +64,8 @@ OUT="$(gate flag "ARCH_APPROVED='1'")"
 want "$OUT" ARCH_GATE open "--arch-approved"
 want "$OUT" REASON approved_at_invocation "--arch-approved"
 
-OUT="$(gate trivial "ARCH_APPROVED='0'" "ARCH_GATE='trivial'")"
-want "$OUT" ARCH_GATE open "trivial change needs no check"
-
-OUT="$(gate waived "ARCH_APPROVED='0'" "ARCH_GATE='waived'")"
-want "$OUT" ARCH_GATE open "the user waived the check"
-want "$OUT" REASON waived "the user waived the check"
+OUT="$(gate oldtrivial "ARCH_APPROVED='0'" "ARCH_GATE='trivial'")"
+want "$OUT" ARCH_GATE closed "a gate value from the old understanding check is not an approval"
 
 pre() { # flags...
   local repo="$TMP/pre-$1"; mkdir -p "$repo"; shift
@@ -72,7 +76,7 @@ pre() { # flags...
 }
 
 OUT="$(pre understood --understood)"
-want "$OUT" ARCH_APPROVED 1 "--understood skips the check"
+want "$OUT" ARCH_APPROVED 1 "--understood skips the stop"
 OUT="$(pre legacyflag --arch-approved)"
 want "$OUT" ARCH_APPROVED 1 "--arch-approved still works"
 OUT="$(pre army --army)"
@@ -111,6 +115,14 @@ want "$OUT" CODEX_REQUESTED 0 "normal risk leaves Codex off"
 
 OUT="$(packet asked auth.py 1 asked)"
 want "$OUT" CODEX_REASON asked "asked and high risk keeps the user's reason"
+
+HEAD_SHA="$(G -C "$TMP/repo-asked" rev-parse HEAD)"
+grep -qx "BEFORE_REV=" "$TMP/pk-asked/packet/scope.txt" && ok "an unknown diff base leaves BEFORE_REV empty" \
+  || bad "BEFORE_REV with a bad base" "empty" "$(grep BEFORE_REV "$TMP/pk-asked/packet/scope.txt")"
+sed -i.bak -e "s/^DIFF_BASE='x'$/DIFF_BASE='$HEAD_SHA'/" "$TMP/pk-asked/state.env"
+(cd "$TMP/repo-asked" && bash "$SCRIPTS/fr-packet.sh" "$TMP/pk-asked") > /dev/null
+grep -qx "BEFORE_REV=$HEAD_SHA" "$TMP/pk-asked/packet/scope.txt" && ok "BEFORE_REV is the diff base" \
+  || bad "BEFORE_REV" "$HEAD_SHA" "$(grep BEFORE_REV "$TMP/pk-asked/packet/scope.txt")"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

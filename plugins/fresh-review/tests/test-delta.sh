@@ -249,10 +249,14 @@ review riskfloor --delta
 want "$TMP/riskfloor.out" PRIOR_RISK high "a high-risk earlier review"
 (cd "$WT" && bash "$SCRIPTS/fr-packet.sh" "$RD" > "$TMP/riskfloor.packet" 2>&1)
 want "$TMP/riskfloor.packet" RISK high "a small delta keeps the earlier high risk"
-echo "ARCH_GATE='not_needed'" >> "$RD/state.env"
+echo "ARCH_GATE='auto'" >> "$RD/state.env"
 record APPROVE '[]'
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["arch_gate"]=="approved"' "$(RECORD_FILE)" \
-  && ok "a delta with no decisions keeps the approval" || bad "record arch_gate after no decisions" approved "$(cat "$(RECORD_FILE)")"
+  && ok "a low-tier delta keeps the approval" || bad "record arch_gate after a low tier" approved "$(cat "$(RECORD_FILE)")"
+echo "ARCH_GATE='shown'" >> "$RD/state.env"
+record APPROVE '[]'
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["arch_gate"]=="approved"' "$(RECORD_FILE)" \
+  && ok "a medium-tier delta keeps the approval" || bad "record arch_gate after a medium tier" approved "$(cat "$(RECORD_FILE)")"
 echo "ARCH_GATE='failed'" >> "$RD/state.env"
 record APPROVE '[]'
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["arch_gate"]=="approved"' "$(RECORD_FILE)" \

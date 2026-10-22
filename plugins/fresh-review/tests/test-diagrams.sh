@@ -57,40 +57,49 @@ run() { TMPDIR="$TMP" PATH="$FAKE_BIN:$PATH" "$@" bash "$SCRIPT" "$RUN"; }
 
 echo "fr-diagrams.sh"
 
-RUN=$(mkrun excalidraw "$GSTACK/bin" class sequence flow)
+RUN=$(mkrun excalidraw "$GSTACK/bin" before after)
 OUT=$(run env)
 want "$OUT" RENDERER excalidraw "gstack present"
-want "$OUT" DIAGRAM_class excalidraw "class renders with excalidraw"
-want "$OUT" DIAGRAM_sequence excalidraw "sequence renders with excalidraw"
-want "$OUT" DIAGRAM_flow excalidraw "flow renders with excalidraw"
-want "$OUT" PNG_flow "$RUN/ui/flow.png" "flow png path reported"
-want "$OUT" EDITABLE_sequence yes "clean render is editable"
-want "$OUT" EXCALIDRAW_class "$RUN/ui/class.excalidraw" "excalidraw path reported"
-[ -s "$RUN/ui/class.svg" ] && ok "svg written" || bad "svg written" "file" "missing"
+want "$OUT" DIAGRAM_before excalidraw "before renders with excalidraw"
+want "$OUT" DIAGRAM_after excalidraw "after renders with excalidraw"
+want "$OUT" PNG_after "$RUN/ui/after.png" "after png path reported"
+want "$OUT" EDITABLE_before yes "clean render is editable"
+want "$OUT" EXCALIDRAW_before "$RUN/ui/before.excalidraw" "excalidraw path reported"
+[ -s "$RUN/ui/before.svg" ] && ok "svg written" || bad "svg written" "file" "missing"
 
-RUN=$(mkrun image-only "$GSTACK/bin" class)
+RUN=$(mkrun old-names "$GSTACK/bin" class sequence flow)
+OUT=$(run env)
+want "$OUT" DIAGRAM_before none "old diagram names are not rendered"
+[ -z "$(key "$OUT" DIAGRAM_class)" ] && ok "no class diagram line" || bad "no class diagram line" "" "$(key "$OUT" DIAGRAM_class)"
+
+RUN=$(mkrun image-only "$GSTACK/bin" after)
 OUT=$(run env FAKE_BUN=image)
-want "$OUT" DIAGRAM_class excalidraw "image-only scene still counts"
-want "$OUT" EDITABLE_class no "image-only scene is not editable"
-want "$OUT" DIAGRAM_sequence none "missing source is none"
-want "$OUT" DIAGRAM_flow none "missing flow source is none"
+want "$OUT" DIAGRAM_after mermaid "an image-only scene takes its png from mmdc"
+want "$OUT" EDITABLE_after no "image-only scene is not editable"
+want "$OUT" EXCALIDRAW_after "$RUN/ui/after.excalidraw" "the image-only scene is still linked"
+want "$OUT" DIAGRAM_before none "missing source is none"
 
-RUN=$(mkrun parse-error "$GSTACK/bin" class)
+RUN=$(mkrun image-no-mmdc "$GSTACK/bin" after)
+OUT=$(run env FAKE_BUN=image FAKE_MMDC=fail)
+want "$OUT" DIAGRAM_after failed "an image-only scene with no mmdc never uses the raw mermaid raster"
+want "$OUT" EXCALIDRAW_after "$RUN/ui/after.excalidraw" "the scene is linked even when no png renders"
+
+RUN=$(mkrun parse-error "$GSTACK/bin" before)
 OUT=$(run env FAKE_BUN=error)
-want "$OUT" DIAGRAM_class mermaid "excalidraw error falls back to mmdc"
-want "$OUT" PNG_class "$RUN/ui/class.png" "fallback png path reported"
-[ -z "$(key "$OUT" EXCALIDRAW_class)" ] && ok "no excalidraw path on fallback" || bad "no excalidraw path on fallback" "" "$(key "$OUT" EXCALIDRAW_class)"
+want "$OUT" DIAGRAM_before mermaid "excalidraw error falls back to mmdc"
+want "$OUT" PNG_before "$RUN/ui/before.png" "fallback png path reported"
+[ -z "$(key "$OUT" EXCALIDRAW_before)" ] && ok "no excalidraw path on fallback" || bad "no excalidraw path on fallback" "" "$(key "$OUT" EXCALIDRAW_before)"
 
-RUN=$(mkrun no-gstack "" sequence flow)
+RUN=$(mkrun no-gstack "" before after)
 OUT=$(run env)
 want "$OUT" RENDERER mermaid "no gstack uses mermaid"
-want "$OUT" DIAGRAM_sequence mermaid "sequence renders with mmdc"
-want "$OUT" DIAGRAM_flow mermaid "flow renders with mmdc"
+want "$OUT" DIAGRAM_before mermaid "before renders with mmdc"
+want "$OUT" DIAGRAM_after mermaid "after renders with mmdc"
 
-RUN=$(mkrun all-fail "$GSTACK/bin" class)
+RUN=$(mkrun all-fail "$GSTACK/bin" after)
 OUT=$(run env FAKE_BUN=error FAKE_MMDC=fail)
-want "$OUT" DIAGRAM_class failed "both renderers fail"
-[ -z "$(key "$OUT" PNG_class)" ] && ok "no png path on failure" || bad "no png path on failure" "" "$(key "$OUT" PNG_class)"
+want "$OUT" DIAGRAM_after failed "both renderers fail"
+[ -z "$(key "$OUT" PNG_after)" ] && ok "no png path on failure" || bad "no png path on failure" "" "$(key "$OUT" PNG_after)"
 
 echo
 echo "$PASS passed, $FAIL failed"

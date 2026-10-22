@@ -12,8 +12,8 @@
 #    locally-checked-out branch (REVIEW_SCOPE=branch). A `yes` here is the RCE
 #    the feature was cut to prevent: the orchestrator would preview_start an
 #    untrusted app on the reviewer's host.
-# 1. Eligibility firing outside pr mode. UI context belongs with the narrative
-#    reader; the lean default run must not carry it.
+# 1. Skipping detection outside pr mode. The brief shows PR screenshots in
+#    every mode, so the default run needs FRONTEND_HITS too.
 # 2. Treating a bare .ts/.js as frontend. Backend TypeScript is not a UI change;
 #    only component frameworks, styles, or files under a UI dir count.
 
@@ -52,22 +52,22 @@ detect() { # name-status-lines | with state kv pairs after --
   bash "$SCRIPTS/fr-ui-detect.sh" "$run"
 }
 
-# --- 1. review mode is never eligible ----------------------------------------
+# --- 1. review mode detects UI too, and never launches ------------------------
 OUT="$(MODE=review REVIEW_SCOPE=branch detect 'M\tapp/components/Nav.tsx\n')"
 want "$OUT" UI_ELIGIBLE no "review mode"
-want "$OUT" UI_REASON "not pr mode" "review mode"
+want "$OUT" FRONTEND_HITS 1 "review mode detects the UI change"
 
 # --- 2. no frontend files --> ineligible -------------------------------------
 OUT="$(detect 'M\tsrc/api/orders.ts\nM\tREADME.md\n')"
 want "$OUT" UI_ELIGIBLE no "backend-only change"
 want "$OUT" FRONTEND_HITS 0 "backend-only change"
 
-# --- 3. frontend change --> ineligible, launching removed --------------------
+# --- 3. frontend change --> ineligible, screenshots from the PR only ---------
 OUT="$(detect 'M\tapp/components/Nav.tsx\n')"
 want "$OUT" UI_ELIGIBLE no "frontend change"
 case "$(key "$OUT" UI_REASON)" in
-  *"app launching removed"*) ok "frontend change names the launching-removed reason" ;;
-  *) bad "frontend reason" "an 'app launching removed' reason" "$(key "$OUT" UI_REASON)" ;;
+  *"never launched"*) ok "frontend change says the app is never launched" ;;
+  *) bad "frontend reason" "a 'never launched' reason" "$(key "$OUT" UI_REASON)" ;;
 esac
 
 # --- 4. RCE guard: a committed launch.json NEVER makes a tree eligible --------

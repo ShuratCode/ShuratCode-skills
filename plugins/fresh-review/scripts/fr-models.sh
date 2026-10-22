@@ -2,10 +2,10 @@
 
 set -uo pipefail
 
-for pass in U I B A K W F R X; do
+for pass in U I B A W F R X; do
   case "$pass" in
     U|I|B) model=opus ;;
-    A|K|W|F) model=sonnet ;;
+    A|W|F) model=sonnet ;;
     X) model=haiku ;;
     R) model=inherit ;;
   esac

@@ -6,14 +6,14 @@ RUN_DIR="${1:?usage: fr-arch-gate.sh <RUN_DIR>}"
 # shellcheck disable=SC1090
 . "$RUN_DIR/state.env"
 
-if [ "${ARCH_APPROVED:-0}" = 1 ]; then
+if [ "${ARCH_APPROVED:-0}" = 1 ] && [ "${ARCH_GATE:-}" != rejected ]; then
   GATE=open; REASON=approved_at_invocation
 else
   case "${ARCH_GATE:-}" in
+    auto)       GATE=open;   REASON=no_architecture_change ;;
+    shown)      GATE=open;   REASON=brief_shown ;;
     approved)   GATE=open;   REASON=approved ;;
     carried)    GATE=open;   REASON=approved_at_last_review ;;
-    trivial|not_needed) GATE=open; REASON=not_needed ;;
-    waived)     GATE=open;   REASON=waived ;;
     failed)     GATE=open;   REASON=detector_failed ;;
     rejected)   GATE=closed; REASON=rejected ;;
     pending)    GATE=closed; REASON=pending ;;
