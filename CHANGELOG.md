@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.30.0 — 2026-11-11
+
+### `fresh-review` 0.21.0 → 0.22.0: flag source-text tests
+
+A test that reads production code as a string and asserts on that text passes when the behavior
+breaks and fails on a harmless rename. No pass caught it.
+
+- **Detector.** `fr-source-text.sh` scans added lines in test files for code read as text
+  (`getsource`, `read_text`/`open`/`readFileSync` on a code file, `?raw` imports) next to a text
+  assertion, and writes the candidates to `packet/source-text-tests.tsv`. Data reads (`.sql`,
+  `.json`, `.yaml`), AST and grimp import guards, and CDK `Template` tests are left out.
+- **Pass I decides.** It reports each real one with the behavior the test claims to guard and
+  the behavior test that should replace it. A source-text test that guards permissions, auth,
+  or money blocks; any other is a should-fix.
+
 ## 0.29.0 — 2026-10-22
 
 ### `fresh-review` 0.20.0 → 0.21.0: an architect-first review

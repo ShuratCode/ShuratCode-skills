@@ -42,6 +42,7 @@ Reviewing someone else's PR, no ship of yours will run it. It is still opt-in th
 |---|---|---|
 | Architecture tier and brief | Pass U (stops on high) | — |
 | Correctness, performance, contracts | Pass I | specialists |
+| Source-text tests (a test that asserts on code text) | Pass I, from `fr-source-text.sh` candidates | `testing` specialist |
 | Standards conformance | Pass A (lattice) — only with a lattice context | `testing` / `maintainability` |
 | Security | Pass B (`/cso`, confidence-gated) | `security` specialist (ungated) |
 | Cross-model review | Pass C (`codex review`) — when requested, and always on `RISK: high` | Codex structured + adversarial |

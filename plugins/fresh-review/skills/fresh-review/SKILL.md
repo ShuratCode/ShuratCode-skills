@@ -153,7 +153,7 @@ On your own branch `/ship` runs `/review` at its Step 9, so this skill never run
 
 Two audiences, two artifacts. Do not confuse them.
 
-- **Chat is for the architect, and it is kept lean.** First the tier: one line for low, the brief for medium and high (Step 4.8). After the code review: the verdict on its own line, then one plain sentence per blocker and should-fix finding, one line per by-design finding, and the count of comments to drop. No code blocks in the review — the diffs are in `report.md`. Chat reads like a normal reply to a person: short sentences, bullets with bold labels, links. Every file reference is a link.
+- **Chat is for the architect, and it is kept lean.** First the tier: one line for low, the brief for medium and high (Step 4.8). After the code review: the verdict on its own line, then one plain sentence per blocker and should-fix finding, one line per by-design finding, and the count of comments to drop. No code blocks in the review — the diffs are in `report.md`. Chat reads like a normal reply to a person: short sentences, bullets with bold labels, links. Every file reference is a link. A source-text test finding names the behavior the test claims to guard and the behavior test that replaces it.
 - **Disk carries the long form.** The brief's full Pass U report, every finding with its ` ```diff ` block, the comment list, the noise and misread findings, the coverage notes, raw pass reports, the diff packet, and the run log all live in the run directory (`report.md` and `raw/`).
 - **Nothing is for GitHub.** No mode posts, comments, or edits a PR. See "What this skill does NOT do".
 
@@ -307,15 +307,17 @@ State the file count out loud. If `LINES` exceeds ~2000, warn that reviewer qual
 
 ### Step 4.4: Lattice context and added comments
 
-Two cheap mechanical checks over the packet. Run both in one Bash call:
+Three cheap mechanical checks over the packet. Run all three in one Bash call:
 
 ```bash
-. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-lattice-detect.sh" "$RUN_DIR"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-comments.sh" "$RUN_DIR"
+. "$RUN_DIR/state.env"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-lattice-detect.sh" "$RUN_DIR"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-comments.sh" "$RUN_DIR"; bash "${CLAUDE_PLUGIN_ROOT}/scripts/fr-source-text.sh" "$RUN_DIR"
 ```
 
 **Lattice context.** `LATTICE_CONTEXT: yes` means this change has a lattice design or context doc, so Pass A runs in Step 5. `LATTICE_REASON` says how it matched: `diff_touches_context`, `branch_match`, or `names_changed_files`. `no` → Pass A does not run, and that is not a gap: say `lattice: not run — no lattice context for this change` once in `report.md`. **Never open the doc it names** — it is intent.
 
 **Added comments.** `fr-comments.sh` lists every comment and docstring the diff *adds* into `packet/comments.tsv` (`file`, `start`, `end`, `kind`, `text`). Tool directives (`noqa`, `type: ignore`, `eslint-disable`, shebangs, license headers) are left out. Read `comments.tsv` in Step 10 for `report.md`, not now. `COMMENT_BLOCKS: 0` → nothing to drop.
+
+**Source-text tests.** `fr-source-text.sh` lists added tests that read production code as a string (`getsource`, `read_text` of a code file, `readFileSync`, a `?raw` import) and assert on that text, into `packet/source-text-tests.tsv` (`file`, `line`, `role`, `text`). Data reads (`.sql`, `.json`, `.yaml`) and AST or grimp import guards are left out. Do not read the file: Pass I decides. `SOURCE_TEXT_FILES: 0` → Pass I skips that check.
 
 ### Step 4.5: Resolve the domain vocabulary
 
@@ -606,6 +608,7 @@ Then append the pass-specific task:
 > 3. **Data and migrations** — a migration that is not reversible, a backfill that locks or loses data, a default that changes stored meaning.
 > 4. **Performance** — a query in a loop, an unbounded read, a hot path that got slower by a large factor. Not micro-tuning.
 > 5. **Readability** — a name that says the wrong thing, a function doing two jobs, dead code, a copy of logic that already exists in the repo (name where). Only in the changed lines, and only when the cost is clear.
+> 6. **Source-text tests** — when `{{RUN_DIR}}/packet/source-text-tests.tsv` is not empty, judge each candidate test in it. It is a finding only when the test asserts on code text (`in`, `not in`, `toMatch`, `toContain`, `index()` order): it passes when the behavior breaks and fails on a harmless rename. Use category `source-text-test`. Say which behavior the test claims to guard, and name the behavior test that replaces it: call the route as a viewer and expect 403; patch the collaborator and run the function; a shared JSON contract; run the script with a fake CLI on `PATH`. A test that guards permissions, auth, or money is HIGH; any other is MEDIUM. An AST or import-graph guard is not a finding.
 >
 > Security is Pass B's; leave it unless it is also a plain correctness bug.
 
@@ -687,11 +690,12 @@ Deduplicate across passes (same `file:line` + same root cause = one finding, sou
 
 **The blocker bar is the loop breaker.** A finding with no failure you can state is **not** a blocker, whatever its severity. Do not promote a finding to bucket 1 "to be safe": a blocker costs a full fix-and-re-review cycle. **On a re-review**, a new finding is a blocker only when the delta caused it; a problem in code the last review already saw goes to bucket 5 at most, with `pre-existing` in its line.
 
-Four overrides:
+Five overrides:
 
 - **Security floor**: a `cso` finding at HIGH or CRITICAL cannot go to bucket 3, 4, or 5 without naming the specific compensating control and where it lives. Absent that, it is a BLOCKER.
 - **Static-analysis floor**: a Pass W `UNADDRESSED` finding is a BLOCKER unless you can name the specific handling Pass W missed, cited by location.
 - **Prior-blocker floor** (re-review only): a Pass F OPEN line is a BLOCKER. It leaves bucket 1 in only three ways, each cited: the specific change, by `file:line`, that fixed it and Pass F missed; a maintainer's dismissal in `pr-context/discussion.md`, quoted; or proof that the earlier finding was a misread, which requires that you opened the file. A blocker that leaves this way is `released` — say which of the three in `report.md` and count it in the log.
+- **Source-text floor**: a `source-text-test` finding on a test that guards permissions, auth, or money is a BLOCKER. Its failure: the control breaks and the test still passes. Any other `source-text-test` finding goes to bucket 5 at most.
 - **Convergence**: a finding raised by two or more passes cannot go to bucket 3. `codex` + any Claude pass is the strongest agreement; `review` + another Claude pass is moderate-to-strong; two Claude passes with different checklists are moderate. Do not manufacture agreement that no pass produced.
 
 **In pr-remote mode there is no producer context:**
