@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.31.0 — 2026-11-17
+
+### `orchestrator` 0.1.0: a pipeline orchestrator with completion contracts
+
+The parent session relayed each child's turn note as "done", even when the child had stopped
+early, cut the findings, or never ran the tests.
+
+- **One child per stage.** The parent triages the ticket, picks a track, and starts each stage
+  as a child session on `sonnet`. A stage starts only after the one before it is done.
+- **Completion contracts.** Each child ends with a `STAGE REPORT` block. `orc-check.sh` checks
+  it against the stage's fields in `references/contracts.md`: files exist, the commit resolves,
+  tests pass, the verdict word is known, and the findings count matches. `waiting` and
+  `blocked` reports skip the contract.
+- **One nudge, then stop.** `orc-state.sh` keeps the stage table and the nudge count on disk.
+  The first miss sends the same child the missing items; the second miss stops and asks you.
+- **Status as tables.** Every message ends with the stage table, a fresh PR table, and a
+  `Needs you:` line.
+- **Gates stay with you.** Spec and design approval, high-risk architecture stops, findings to
+  fix, learnings, push, merge, and any post wait for your words. fresh-review stack mode is
+  unchanged.
+
+### `everything` 0.5.0 → 0.6.0: add `orchestrator`
+
 ## 0.30.0 — 2026-11-11
 
 ### `fresh-review` 0.21.0 → 0.22.0: flag source-text tests
