@@ -21,6 +21,7 @@ format. Chat is the odd one out: it has no marketplace and takes zip uploads onl
 | **pull-all** | Point it at a directory; it finds every git repo underneath and fast-forwards each one's main branch from origin, in parallel. Never switches branches, never merges non-fast-forward, never touches a dirty tree. Reports one worst-first line per repo. | git |
 | **worktree-cleanup** | Classifies the linked worktrees of a repo and, once you approve them, removes only the ones that are safe — never a worktree with uncommitted changes, unpublished commits, gitignored local files, or a lock, and never the primary. Dry-run by default. | git |
 | **restaurant-search** | Finds restaurants through three gates — in the right area, verifiably open at the target time in the *restaurant's* timezone, and with a menu that verifiably contains a qualifying dish. Never fills gaps with plausible guesses. | nothing |
+| **orchestrator** | Drives one ticket through the pipeline — triage, spec, design, build, review, QA, harvest, ship — with one child session per stage. Each child ends with a STAGE REPORT that a script checks against its contract; a miss gets one nudge, a second miss stops and asks you. Every status is a table, and approval gates wait for your words. | Claude desktop app session tools, `gh`, Asana MCP, lattice and gstack skills |
 | **everything** | Meta-plugin with no skills of its own. Installing it pulls in every other plugin. | — |
 
 ## Install — Claude Code
