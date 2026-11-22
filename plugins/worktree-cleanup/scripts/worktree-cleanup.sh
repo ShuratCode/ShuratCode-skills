@@ -15,6 +15,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 REPO=""
 PRUNE=0
 FORCE=0
+OFFLINE=0
 declare -a REMOVE=()
 MODE="report"
 
@@ -31,6 +32,10 @@ A worktree is kept (never a REMOVE candidate) when it has:
   - commits not reachable from any remote-tracking branch (unpublished work), or
   - a lock.
 
+A clean, unlocked worktree whose branch has a merged GitHub PR is a REMOVE
+candidate when its HEAD is the PR head or an ancestor of it. This holds even with
+squash-merged (unpublished) commits or ignored local files. Needs `gh`.
+
 options:
   -C, --repo PATH     repo to operate on (default: cwd's repo)
       --remove PATH    delete this worktree (repeatable). Refuses a KEEP/PRUNABLE
@@ -39,6 +44,7 @@ options:
                        directory is already gone from disk. Safe; deletes no work.
       --force          let --remove delete a worktree classified KEEP. Dangerous:
                        discards uncommitted changes and unpublished commits.
+      --offline        skip the merged-PR lookup (no `gh` calls).
   -h, --help          this
 
 exit: 0 ok; 1 a --remove target was refused or a removal failed; 2 bad usage.
@@ -57,6 +63,7 @@ while [ $# -gt 0 ]; do
     --remove)   need_val "$1" "$#" "${2:-}"; REMOVE+=("$2"); MODE="remove"; shift 2 ;;
     --prune)    PRUNE=1; shift ;;
     --force)    FORCE=1; shift ;;
+    --offline)  OFFLINE=1; shift ;;
     -h|--help)  usage; exit 0 ;;
     -*)         echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     *)          echo "unexpected argument: $1 (paths go after --remove)" >&2; exit 2 ;;
@@ -94,6 +101,21 @@ canon() {
 }
 PRIMARY="$(canon "$PRIMARY")"
 
+merged_pr() {
+  [ "$OFFLINE" -eq 0 ] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  local branch; branch="$(git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null)" || return 0
+  local rows; rows="$(cd "$PRIMARY" && gh pr list --head "$branch" --state merged \
+    --json number,headRefOid --jq '.[] | "\(.number) \(.headRefOid)"' 2>/dev/null)" || return 0
+  local num oid
+  while read -r num oid; do
+    [ -n "$oid" ] || continue
+    if [ "$oid" = "$2" ] || git -C "$REPO" merge-base --is-ancestor "$2" "$oid" 2>/dev/null; then
+      echo "$num"; return 0
+    fi
+  done <<< "$rows"
+}
+
 # classify PATH -> prints "VERDICT<TAB>REASON". VERDICT in KEEP|REMOVE|PRUNABLE.
 # Reads the porcelain block for that exact worktree path.
 classify() {
@@ -127,6 +149,8 @@ classify() {
   if [ "$HAS_REMOTE" -eq 0 ]; then
     printf 'KEEP\tno remote to verify against\n'; return
   fi
+  local pr; pr="$(merged_pr "$target" "$head")"
+  if [ -n "$pr" ]; then printf 'REMOVE\tPR #%s merged\n' "$pr"; return; fi
   local ahead; ahead="$(git -C "$REPO" rev-list --count "$head" --not --remotes 2>/dev/null)"
   if [ -z "$ahead" ]; then printf 'KEEP\tcould not compare to remotes\n'; return; fi
   if [ "$ahead" -gt 0 ]; then printf 'KEEP\t%s unpublished commit(s)\n' "$ahead"; return; fi
@@ -169,6 +193,7 @@ if [ "$MODE" = "report" ]; then
     git -C "$REPO" worktree prune -v || { echo "prune failed"; prune_rc=1; }
   fi
   echo "note: \"published\" is checked against local remote-tracking refs — run \`git fetch\` first for an up-to-date result."
+  [ "$OFFLINE" -eq 1 ] && echo "note: --offline — merged PRs were not checked."
   echo "=== next: worktree-cleanup.sh --remove <PATH> for each one you approve ==="
   exit $prune_rc
 fi

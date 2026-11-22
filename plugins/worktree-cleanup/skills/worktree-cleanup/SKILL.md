@@ -34,6 +34,15 @@ A worktree is **kept, never a delete candidate**, when it has any of:
 Everything else — clean working tree, HEAD already on a remote — is a `REMOVE`
 candidate. The user still approves each one before anything is deleted.
 
+**A merged PR makes a worktree removable.** When the worktree is clean and
+unlocked, and its branch has a merged GitHub PR whose head is the worktree's HEAD
+(or contains it), the verdict is `REMOVE  PR #N merged`. This beats the
+unpublished-commits check (squash merges leave the branch commits off every
+remote) and the ignored-files check (a local `.env` is not work). A commit made
+after the merge, or any uncommitted change, still keeps it. The lookup uses
+`gh pr list`; if `gh` is missing, not logged in, or the remote is not on GitHub,
+the old rules apply. Pass `--offline` to skip it.
+
 ## 1) Dry run — classify everything
 
 Run this first, every time. It deletes nothing.
@@ -52,7 +61,7 @@ Output is a table, one row per linked worktree:
 
 | VERDICT | meaning |
 |---|---|
-| `REMOVE` | clean and fully published — safe to delete once approved |
+| `REMOVE` | clean and fully published, or its PR is merged — safe to delete once approved |
 | `KEEP` | has uncommitted changes, unpublished commits, a lock, or its status could not be read (fail-closed) |
 | `PRUNABLE` | the worktree's directory is already gone from disk — clear the stale admin entry with `--prune` |
 
@@ -93,6 +102,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-cleanup.sh" --prune
 | `-C, --repo PATH` | repo to operate on (default: the current directory's repo) |
 | `--remove PATH` | delete this worktree; repeatable; only named paths are ever touched |
 | `--prune` | also run `git worktree prune` — clears admin entries for directories already gone |
+| `--offline` | skip the merged-PR lookup — no `gh` calls |
 | `--force` | let `--remove` delete a `KEEP` worktree — **discards uncommitted changes and unpublished commits**. Never overrides the primary-worktree refusal. |
 
 ## Safety model
@@ -103,6 +113,8 @@ State these to the user when they hesitate — they are guarantees of the script
   delete anything.
 - **Only named paths are touched.** `--remove` acts on exactly the paths given,
   nothing discovered. There is no "remove all".
+- **The only network call is a read.** The merged-PR check runs `gh pr list`;
+  nothing is fetched or pushed.
 - **Every removal is re-checked.** A path that became dirty or grew an
   unpublished commit between the dry run and the remove is `REFUSED`, not deleted.
 - **Fail closed.** If `git status` errors on a worktree, it is kept, never
@@ -110,6 +122,9 @@ State these to the user when they hesitate — they are guarantees of the script
 - **The primary worktree is never removable**, not even with `--force`.
 - **`--force` is the only way to delete a `KEEP` worktree**, and it says loudly
   what it discarded.
+- **A merged PR is trusted only up to its head commit.** The worktree's HEAD must
+  equal the PR's `headRefOid` or be its ancestor, so a commit added after the
+  merge reads as unpublished and is kept.
 - **"Published" is judged against *local* remote-tracking refs, not the live
   remote.** The script never touches the network. If a branch was deleted or
   rewound on the real remote but your stale `refs/remotes/…` still points at those
@@ -145,7 +160,7 @@ State these to the user when they hesitate — they are guarantees of the script
   deleted on the remote leaves a stale local ref, and a worktree on those commits
   then reads `clean, fully published` even though the work is no longer on the
   remote. `git fetch --prune` before the dry run closes the window; the tool never
-  fetches on its own because a cleanup command should have no network side effects.
+  fetches on its own.
   The same "only as fresh as the last fetch" caveat, plus a shallow clone or grafts
   altering reachability, is the one narrow case where a detached-HEAD worktree's
   commits could be miscounted — `git fetch` and a full (non-shallow) clone remove it.
