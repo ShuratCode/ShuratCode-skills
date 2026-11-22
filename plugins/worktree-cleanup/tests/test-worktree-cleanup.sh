@@ -23,6 +23,14 @@ trap 'rm -rf "$TMP"' EXIT
 
 GA=(-c user.email=t@t -c user.name=t -c commit.gpgsign=false)
 
+FAKE_GH="$TMP/fake-gh"; mkdir -p "$FAKE_GH/prs"
+cat > "$FAKE_GH/gh" <<'GH'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do [ "$1" = "--head" ] && { cat "$FAKE_GH_PRS/$2" 2>/dev/null; exit 0; }; shift; done
+GH
+chmod +x "$FAKE_GH/gh"
+export FAKE_GH_PRS="$FAKE_GH/prs" PATH="$FAKE_GH:$PATH"
+
 ok()   { PASS=$((PASS+1)); printf '  \033[32mok\033[0m    %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; }
 # assert that running the tool with the given args produces stdout containing PATTERN
@@ -184,6 +192,30 @@ grep_ok  "ignored worktree removed with --force" 'FORCED.*wts/env'       --repo 
 if ( bash "$S" --repo "$IG" --remove --force </dev/null >/dev/null 2>&1 ); then
   bad "--remove --force should exit 2"; else
   rc=$?; [ "$rc" -eq 2 ] && ok "--remove <flag> rejected (exit 2)" || bad "--remove <flag> exit was $rc"; fi
+
+# 20. merged PR: a squash-merged branch with ignored files is REMOVE; work added
+#     after the merge, a dirty tree, or --offline keeps it.
+MP="$TMP/merged"; RMP="$MP-remote.git"; rm -rf "$MP" "$RMP"
+git init -q --bare "$RMP"; git init -q "$MP"
+( cd "$MP"; printf '.env\n' > .gitignore; git add .gitignore
+  git "${GA[@]}" commit -q -m init; git branch -M main
+  git remote add origin "$RMP"; git push -q -u origin main
+  for b in squashed later dirtymerged; do
+    git worktree add -q -b "$b" "wts/$b" HEAD
+    ( cd "wts/$b"; echo "$b" > work.txt; git add work.txt; git "${GA[@]}" commit -q -m "$b"; echo S=1 > .env )
+  done
+  echo "7 $(git -C wts/squashed rev-parse HEAD)" > "$FAKE_GH_PRS/squashed"
+  echo "8 $(git -C wts/later rev-parse HEAD)" > "$FAKE_GH_PRS/later"
+  ( cd wts/later; echo more >> work.txt; git "${GA[@]}" commit -q -am after-merge )
+  echo "9 $(git -C wts/dirtymerged rev-parse HEAD)" > "$FAKE_GH_PRS/dirtymerged"
+  echo edit >> wts/dirtymerged/work.txt )
+grep_ok  "merged PR -> REMOVE"                  'REMOVE +wts/squashed +PR #7 merged' --repo "$MP"
+grep_ok  "commit after merge -> KEEP unpub"     'KEEP +wts/later +2 unpublished'     --repo "$MP"
+grep_ok  "merged but dirty -> KEEP dirty"       'KEEP +wts/dirtymerged +dirty'       --repo "$MP"
+grep_ok  "--offline skips the PR lookup"        'KEEP +wts/squashed +1 unpublished'  --repo "$MP" --offline
+grep_ok  "--offline says PRs were not checked"  'merged PRs were not checked'        --repo "$MP" --offline
+grep_ok  "merged PR worktree removed"           'REMOVED.*wts/squashed'              --repo "$MP" --remove "$MP/wts/squashed"
+grep_ok  "commit after merge refused"           'REFUSED.*wts/later'                 --repo "$MP" --remove "$MP/wts/later"
 
 echo
 if [ "$FAIL" -gt 0 ]; then

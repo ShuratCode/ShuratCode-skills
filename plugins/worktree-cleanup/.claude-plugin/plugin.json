@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "worktree-cleanup",
-  "version": "0.1.0",
-  "description": "Safely clean up git worktrees: dry-run classification, then delete only user-approved ones, never those with uncommitted changes or unpublished commits.",
+  "version": "0.2.0",
+  "description": "Safely clean up git worktrees: dry-run classification, then delete only user-approved ones, never those with uncommitted changes or unpublished commits; worktrees with a merged PR are removable.",
   "author": {
     "name": "Shaked Eyal",
     "url": "https://github.com/ShuratCode"

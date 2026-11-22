@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.32.0 — 2026-11-22
+
+### `worktree-cleanup` 0.1.0 → 0.2.0: clean up worktrees whose PR is merged
+
+A worktree from a squash-merged PR was kept forever: its commits are on no remote, and a local
+`.env` blocked it too.
+
+- **Merged PR → `REMOVE`.** For a clean, unlocked worktree on a branch, the script asks
+  `gh pr list --head <branch> --state merged`. If the PR head is the worktree's HEAD or contains
+  it, the verdict is `REMOVE  PR #N merged`, even with unpublished commits or ignored files.
+- **Still kept:** uncommitted changes, a lock, or a commit made after the merge.
+- **Falls back** to the old rules when `gh` is missing or fails. `--offline` skips the lookup.
+
 ## 0.31.0 — 2026-11-17
 
 ### `orchestrator` 0.1.0: a pipeline orchestrator with completion contracts
